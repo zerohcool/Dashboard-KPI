@@ -1,3 +1,5 @@
+import { supabase, isSupabaseConfigured } from './supabaseClient';
+
 export interface Equipment {
   id: string;
   name: string;
@@ -40,12 +42,11 @@ const DEFAULT_SETTINGS: ContractSettings = {
   requiredPickups: 8
 };
 
-// Generate a random UUID-like string
 const generateId = () => Math.random().toString(36).substr(2, 9).toUpperCase();
 
 // Helper to parse HH:MM blasting time to decimal hours
 export const parseBlastingTimeToDecimal = (timeStr: string): number => {
-  const parts = timeStr.split(':');
+  const parts = String(timeStr).split(':');
   if (parts.length === 2) {
     const h = parseInt(parts[0], 10) || 0;
     const m = parseInt(parts[1], 10) || 0;
@@ -56,6 +57,72 @@ export const parseBlastingTimeToDecimal = (timeStr: string): number => {
 };
 
 export const dbService = {
+  isSupabaseEnabled(): boolean {
+    return isSupabaseConfigured;
+  },
+
+  async syncFromSupabase(): Promise<void> {
+    if (!supabase) return;
+    
+    // 1. Fetch equipment
+    const { data: eqData, error: eqErr } = await supabase.from('equipment').select('*');
+    if (eqErr) throw eqErr;
+    if (eqData) {
+      const mappedFleet: Equipment[] = eqData.map((row: any) => ({
+        id: row.id,
+        name: row.name,
+        type: row.type as Equipment['type'],
+        patent: row.patent || '',
+        isContractual: row.is_contractual,
+        createdAt: row.created_at
+      }));
+      localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(mappedFleet));
+    }
+    
+    // 2. Fetch blasting times
+    const { data: btData, error: btErr } = await supabase.from('blasting_times').select('*');
+    if (btErr) throw btErr;
+    if (btData) {
+      const btMap: Record<string, string> = {};
+      btData.forEach((row: any) => {
+        btMap[row.date] = row.time;
+      });
+      localStorage.setItem('disponibilidad_equipos_blasting_times', JSON.stringify(btMap));
+    }
+    
+    // 3. Fetch availability records
+    const { data: recData, error: recErr } = await supabase.from('availability_records').select('*');
+    if (recErr) throw recErr;
+    if (recData) {
+      const mappedRecords: AvailabilityRecord[] = recData.map((row: any) => ({
+        id: row.id,
+        equipmentId: row.equipment_id,
+        date: row.date,
+        status: row.status as AvailabilityRecord['status'],
+        startHour: row.start_hour,
+        endHour: row.end_hour,
+        hoursOutOfService: parseFloat(row.hours_out_of_service),
+        hoursPostBlasting: parseFloat(row.hours_post_blasting),
+        hoursAvailable: parseFloat(row.hours_available),
+        comment: row.comment || ''
+      }));
+      localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(mappedRecords));
+    }
+    
+    // 4. Fetch contract settings
+    const { data: setLocal, error: setErr } = await supabase.from('contract_settings').select('*').eq('id', 1).maybeSingle();
+    if (setErr) throw setErr;
+    if (setLocal) {
+      const settingsMapped: ContractSettings = {
+        requiredFactoryTrucks: setLocal.required_factory_trucks,
+        requiredFrontLoaders: setLocal.required_front_loaders,
+        requiredPowderKegs: setLocal.required_powder_kegs,
+        requiredPickups: setLocal.required_pickups
+      };
+      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsMapped));
+    }
+  },
+
   getEquipment(): Equipment[] {
     const data = localStorage.getItem(STORAGE_KEYS.EQUIPMENT);
     if (!data) {
@@ -65,7 +132,7 @@ export const dbService = {
     return JSON.parse(data);
   },
 
-  addEquipment(name: string, type: Equipment['type'], patent: string, isContractual: boolean): Equipment {
+  async addEquipment(name: string, type: Equipment['type'], patent: string, isContractual: boolean): Promise<Equipment> {
     const fleet = this.getEquipment();
     const newEq: Equipment = {
       id: generateId(),
@@ -77,19 +144,35 @@ export const dbService = {
     };
     fleet.push(newEq);
     localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(fleet));
+
+    if (supabase) {
+      const { error } = await supabase.from('equipment').insert([{
+        id: newEq.id,
+        name: newEq.name,
+        type: newEq.type,
+        patent: newEq.patent,
+        is_contractual: newEq.isContractual,
+        created_at: newEq.createdAt
+      }]);
+      if (error) throw error;
+    }
     return newEq;
   },
 
-  deleteEquipment(id: string): void {
+  async deleteEquipment(id: string): Promise<void> {
     const fleet = this.getEquipment().filter(eq => eq.id !== id);
     localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(fleet));
     
-    // Also remove associated records
     const records = this.getAllRecords().filter(r => r.equipmentId !== id);
     localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(records));
+
+    if (supabase) {
+      const { error } = await supabase.from('equipment').delete().eq('id', id);
+      if (error) throw error;
+    }
   },
 
-  updateEquipment(id: string, name: string, type: Equipment['type'], patent: string, isContractual: boolean): void {
+  async updateEquipment(id: string, name: string, type: Equipment['type'], patent: string, isContractual: boolean): Promise<void> {
     const fleet = this.getEquipment();
     const idx = fleet.findIndex(eq => eq.id === id);
     if (idx !== -1) {
@@ -101,20 +184,39 @@ export const dbService = {
         isContractual
       };
       localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(fleet));
+
+      if (supabase) {
+        const { error } = await supabase.from('equipment').update({
+          name,
+          type,
+          patent,
+          is_contractual: isContractual
+        }).eq('id', id);
+        if (error) throw error;
+      }
     }
   },
 
   getContractSettings(): ContractSettings {
     const data = localStorage.getItem(STORAGE_KEYS.SETTINGS);
-    if (!data) {
-      localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
-      return DEFAULT_SETTINGS;
-    }
+    if (!data) return DEFAULT_SETTINGS;
     return JSON.parse(data);
   },
 
-  saveContractSettings(settings: ContractSettings): void {
+  async saveContractSettings(settings: ContractSettings): Promise<void> {
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settings));
+
+    if (supabase) {
+      const { error } = await supabase.from('contract_settings').upsert({
+        id: 1,
+        required_factory_trucks: settings.requiredFactoryTrucks,
+        required_front_loaders: settings.requiredFrontLoaders,
+        required_powder_kegs: settings.requiredPowderKegs,
+        required_pickups: settings.requiredPickups,
+        updated_at: new Date().toISOString()
+      });
+      if (error) throw error;
+    }
   },
 
   getAllRecords(): AvailabilityRecord[] {
@@ -177,21 +279,32 @@ export const dbService = {
     return String(val);
   },
 
-  saveBlastingTimeForDate(date: string, time: string): void {
+  async saveBlastingTimeForDate(date: string, time: string): Promise<void> {
     const data = localStorage.getItem('disponibilidad_equipos_blasting_times');
     const map = data ? JSON.parse(data) : {};
     map[date] = time;
     localStorage.setItem('disponibilidad_equipos_blasting_times', JSON.stringify(map));
+
+    if (supabase) {
+      const { error } = await supabase.from('blasting_times').upsert({
+        date,
+        time
+      });
+      if (error) throw error;
+    }
   },
 
-  saveAvailabilityRecords(date: string, recordsInput: { equipmentId: string; status: AvailabilityRecord['status']; startHour: number; endHour: number; comment: string }[]): void {
+  async saveAvailabilityRecords(
+    date: string, 
+    recordsInput: { equipmentId: string; status: AvailabilityRecord['status']; startHour: number; endHour: number; comment: string }[]
+  ): Promise<void> {
     const allRecords = this.getAllRecords();
     const blastingTime = this.getBlastingTimeForDate(date);
     
-    // Filter out existing records for this date to overwrite
+    // Filter out existing records for this date to overwrite locally
     let updatedRecords = allRecords.filter(r => r.date !== date);
+    const recordsToInsert: AvailabilityRecord[] = [];
     
-    // Add new/updated records
     recordsInput.forEach(input => {
       let startHour = 7;
       let endHour = 7;
@@ -203,14 +316,13 @@ export const dbService = {
         endHour = Math.min(19, Math.max(startHour, input.endHour));
         hoursOutOfService = endHour - startHour;
         
-        // Portion after blasting time
         const blastingTimeDec = parseBlastingTimeToDecimal(blastingTime);
         hoursPostBlasting = Math.max(0, endHour - Math.max(startHour, blastingTimeDec));
       }
       
       const hoursAvailable = 12 - (hoursOutOfService - hoursPostBlasting);
       
-      updatedRecords.push({
+      const newRec: AvailabilityRecord = {
         id: generateId(),
         equipmentId: input.equipmentId,
         date,
@@ -221,38 +333,63 @@ export const dbService = {
         hoursPostBlasting,
         hoursAvailable,
         comment: input.comment || ''
-      });
+      };
+      
+      recordsToInsert.push(newRec);
+      updatedRecords.push(newRec);
     });
 
     localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updatedRecords));
+
+    if (supabase) {
+      // 1. Delete old entries for this date
+      const { error: delError } = await supabase.from('availability_records').delete().eq('date', date);
+      if (delError) throw delError;
+
+      // 2. Insert new ones
+      if (recordsToInsert.length > 0) {
+        const { error: insError } = await supabase.from('availability_records').insert(
+          recordsToInsert.map(r => ({
+            id: r.id,
+            equipment_id: r.equipmentId,
+            date: r.date,
+            status: r.status,
+            start_hour: r.startHour,
+            end_hour: r.endHour,
+            hours_out_of_service: r.hoursOutOfService,
+            hours_post_blasting: r.hoursPostBlasting,
+            hours_available: r.hoursAvailable,
+            comment: r.comment
+          }))
+        );
+        if (insError) throw insError;
+      }
+    }
   },
 
-  seedData() {
-    console.log('Seeding initial equipment and history data...');
-    
-    // 1. Initial Fleet
+  seedData(): void {
     const initialFleet: Equipment[] = [];
-    
-    // 6 Factory Trucks (Camiones Fábrica)
+
+    // 6 Factory Trucks
     for (let i = 1; i <= 6; i++) {
       initialFleet.push({
         id: `eq-cf-0${i}`,
         name: `CF-0${i}`,
         type: 'Camión Fábrica',
         patent: `CF-100${i}`,
-        isContractual: i <= 5, // 5 are contractual, 1 is backup
+        isContractual: true,
         createdAt: new Date().toISOString()
       });
     }
 
-    // 3 Front Loaders / Tapapozos (Cargador Frontal)
+    // 3 Front Loaders (Cargador Frontal)
     for (let i = 1; i <= 3; i++) {
       initialFleet.push({
-        id: `eq-ll-0${i}`,
-        name: `LL-0${i}`,
+        id: `eq-cf-tp0${i}`,
+        name: `CF-TP0${i}`,
         type: 'Cargador Frontal',
-        patent: `LL-200${i}`,
-        isContractual: i <= 2, // 2 contractual, 1 backup
+        patent: `TP-200${i}`,
+        isContractual: true,
         createdAt: new Date().toISOString()
       });
     }
@@ -264,7 +401,7 @@ export const dbService = {
         name: `PM-0${i}`,
         type: 'Polvorín Móvil',
         patent: `PM-300${i}`,
-        isContractual: i <= 2, // 2 contractual, 1 backup
+        isContractual: true,
         createdAt: new Date().toISOString()
       });
     }
@@ -277,7 +414,7 @@ export const dbService = {
         name: `C-${idx}`,
         type: 'Camioneta',
         patent: `CC-40${idx}`,
-        isContractual: i <= 8, // 8 contractual, 2 backup
+        isContractual: true,
         createdAt: new Date().toISOString()
       });
     }
@@ -285,7 +422,7 @@ export const dbService = {
     localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(initialFleet));
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
 
-    // 2. Seed 14 days of history (including today)
+    // Seed 14 days of history (including today)
     const historyRecords: AvailabilityRecord[] = [];
     const today = new Date();
 
@@ -295,15 +432,12 @@ export const dbService = {
       const dateStr = targetDate.toISOString().split('T')[0];
 
       initialFleet.forEach(eq => {
-        // Base case: Equipment is Operativo (12 hours available)
         let status: AvailabilityRecord['status'] = 'Operativo';
         let hoursOutOfService = 0;
         let comment = '';
 
-        // Introduce deterministic but realistic random failures to make metrics interesting
         const rand = Math.random();
         
-        // Factory Trucks have a slightly higher chance of maintenance/repair
         if (eq.type === 'Camión Fábrica') {
           if (rand < 0.08) {
             status = 'Mantención Preventiva';
@@ -323,7 +457,6 @@ export const dbService = {
             comment = 'Reemplazo preventivo de sensor según análisis de vibración';
           }
         } 
-        // Front Loaders
         else if (eq.type === 'Cargador Frontal') {
           if (rand < 0.06) {
             status = 'Mantención Preventiva';
@@ -335,7 +468,6 @@ export const dbService = {
             comment = 'Reparación de sistema eléctrico de arranque';
           }
         } 
-        // Powder kegs
         else if (eq.type === 'Polvorín Móvil') {
           if (rand < 0.05) {
             status = 'Mantención Correctiva';
@@ -343,7 +475,6 @@ export const dbService = {
             comment = 'Avería en sensor de velocidad / GPS';
           }
         } 
-        // Pickups (rarely down, quick repairs)
         else if (eq.type === 'Camioneta') {
           if (rand < 0.04) {
             status = 'Mantención Preventiva';

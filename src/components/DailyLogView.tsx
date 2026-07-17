@@ -218,9 +218,17 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       }
     }
 
-    dbService.saveBlastingTimeForDate(selectedDate, blastingTime);
-    dbService.saveAvailabilityRecords(selectedDate, recordsToSave);
-    addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
+    Promise.all([
+      dbService.saveBlastingTimeForDate(selectedDate, blastingTime),
+      dbService.saveAvailabilityRecords(selectedDate, recordsToSave)
+    ])
+      .then(() => {
+        addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al guardar en Supabase.', 'error');
+      });
   };
 
   const copyFromPreviousDay = () => {

@@ -36,9 +36,15 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
       return;
     }
 
-    dbService.saveContractSettings(settings);
-    addToast('Configuración de contrato guardada exitosamente.', 'success');
-    onConfigChanged();
+    dbService.saveContractSettings(settings)
+      .then(() => {
+        addToast('Configuración de contrato guardada exitosamente.', 'success');
+        onConfigChanged();
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al guardar en Supabase.', 'error');
+      });
   };
 
   const handleChange = (key: keyof ContractSettings, val: number) => {

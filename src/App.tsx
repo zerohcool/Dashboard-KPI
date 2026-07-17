@@ -41,7 +41,19 @@ function App() {
 
   useEffect(() => {
     refreshFleet();
-  }, [refreshFleet]);
+    
+    if (dbService.isSupabaseEnabled()) {
+      dbService.syncFromSupabase()
+        .then(() => {
+          refreshFleet();
+          addToast('Datos sincronizados con Supabase', 'success');
+        })
+        .catch(err => {
+          console.error("Supabase sync error:", err);
+          addToast('Error al sincronizar con Supabase. Operando localmente.', 'error');
+        });
+    }
+  }, [refreshFleet, addToast]);
 
   const renderView = () => {
     switch (activeView) {

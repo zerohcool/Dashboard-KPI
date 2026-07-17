@@ -40,14 +40,18 @@ export const FleetView: React.FC<FleetViewProps> = ({ fleet, onFleetChanged, add
       return;
     }
 
-    dbService.addEquipment(name.trim().toUpperCase(), type, patent.trim().toUpperCase(), true);
-    addToast(`Equipo ${name} registrado correctamente.`, 'success');
-    
-    // Reset form
-    setName('');
-    setPatent('');
-    setShowAddForm(false);
-    onFleetChanged();
+    dbService.addEquipment(name.trim().toUpperCase(), type, patent.trim().toUpperCase(), true)
+      .then(() => {
+        addToast(`Equipo ${name} registrado correctamente.`, 'success');
+        setName('');
+        setPatent('');
+        setShowAddForm(false);
+        onFleetChanged();
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al registrar equipo en Supabase.', 'error');
+      });
   };
 
   const handleStartEdit = (eq: Equipment) => {
@@ -80,18 +84,29 @@ export const FleetView: React.FC<FleetViewProps> = ({ fleet, onFleetChanged, add
       editType,
       editPatent.trim().toUpperCase(),
       true
-    );
-
-    addToast(`Equipo ${editName} actualizado correctamente.`, 'success');
-    setEditingEq(null);
-    onFleetChanged();
+    )
+      .then(() => {
+        addToast(`Equipo ${editName} actualizado correctamente.`, 'success');
+        setEditingEq(null);
+        onFleetChanged();
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al actualizar equipo en Supabase.', 'error');
+      });
   };
 
   const handleDelete = (id: string, name: string) => {
     if (window.confirm(`¿Está seguro de eliminar el equipo "${name}"? Esto también eliminará todo su historial de registros.`)) {
-      dbService.deleteEquipment(id);
-      addToast(`Equipo ${name} eliminado.`, 'success');
-      onFleetChanged();
+      dbService.deleteEquipment(id)
+        .then(() => {
+          addToast(`Equipo ${name} eliminado.`, 'success');
+          onFleetChanged();
+        })
+        .catch(err => {
+          console.error(err);
+          addToast('Error al eliminar equipo en Supabase.', 'error');
+        });
     }
   };
 

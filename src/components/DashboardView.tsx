@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { dbService } from '../services/db';
-import type { Equipment } from '../services/db';
+import type { Equipment, PeriodCompliance } from '../services/db';
 import { 
   calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours 
 } from '../utils/calculations';
@@ -9,7 +9,7 @@ import {
   BarChart, Bar, Cell, PieChart, Pie
 } from 'recharts';
 import { 
-  Download, FileDown, Clock, X, AlertTriangle, Award 
+  Download, FileDown, Clock, X, AlertTriangle, Award, Save 
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -53,9 +53,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   // Dashboard Tabs: 'overview' | 'kpi'
   const [activeTab, setActiveTab] = useState<'overview' | 'kpi'>('overview');
 
-  // Selective equipment types state
+  // Selective equipment types state (Phase 17: Camioneta NOT selected by default!)
   const [selectedTypes, setSelectedTypes] = useState<Equipment['type'][]>(
-    ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta']
+    ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil']
   );
 
   const dashboardRef = useRef<HTMLDivElement>(null);
@@ -71,6 +71,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const qualityCompliances = useMemo(() => dbService.getQualityComplianceForRange(startDate, endDate), [startDate, endDate, fleet]);
   const weeklyAttendances = useMemo(() => dbService.getWeeklyAttendanceList(), [fleet]);
 
+  // Period compliance editing state (Phase 17: edited directly in Dashboard)
+  const [periodCompliancesState, setPeriodCompliancesState] = useState<Record<string, { realValue: number; compliancePct: number }>>({});
+
+  useEffect(() => {
+    const list = dbService.getPeriodCompliancesForRange(startDate, endDate);
+    const map: Record<string, { realValue: number; compliancePct: number }> = {};
+    list.forEach(p => {
+      map[p.kpiId] = { realValue: p.realValue, compliancePct: p.compliancePct };
+    });
+    setPeriodCompliancesState(map);
+  }, [startDate, endDate]);
+
+  const activePeriodCompliances = useMemo<PeriodCompliance[]>(() => {
+    return Object.keys(periodCompliancesState).map(kpiId => ({
+      startDate,
+      endDate,
+      kpiId,
+      realValue: periodCompliancesState[kpiId].realValue,
+      compliancePct: periodCompliancesState[kpiId].compliancePct
+    }));
+  }, [periodCompliancesState, startDate, endDate]);
+
   // Calculate days in range
   const daysCount = useMemo(() => {
     const start = new Date(startDate);
@@ -79,7 +101,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
   }, [startDate, endDate]);
 
-  // Compute metrics with selectedTypes & new datasets
+  // Compute metrics with selectedTypes & activePeriodCompliances
   const metrics = useMemo(() => {
     return calculateMetrics(
       fleet, 
@@ -93,9 +115,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
       qualityCompliances,
       weeklyAttendances,
       kpis,
-      roles
+      roles,
+      activePeriodCompliances
     );
-  }, [fleet, records, settings, daysCount, selectedTypes, startDate, endDate, rawMaterials, qualityCompliances, weeklyAttendances, kpis, roles]);
+  }, [fleet, records, settings, daysCount, selectedTypes, startDate, endDate, rawMaterials, qualityCompliances, weeklyAttendances, kpis, roles, activePeriodCompliances]);
+
+  // Save Period KPIs to DB
+  const handleSavePeriodKPIs = () => {
+    const promises = Object.keys(periodCompliancesState).map(kpiId => {
+      const item = periodCompliancesState[kpiId];
+      return dbService.savePeriodCompliance(startDate, endDate, kpiId, item.realValue, item.compliancePct);
+    });
+
+    Promise.all(promises)
+      .then(() => {
+        addToast('KPIs de Calidad y Seguridad para el período guardados exitosamente.', 'success');
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al guardar datos en Supabase.', 'error');
+      });
+  };
 
   // Quick Range Presets
   const setRangePreset = (days: number) => {
@@ -116,26 +156,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     setEndDate(lastDay.toISOString().split('T')[0]);
   };
 
-  // Preset for specific contractual cycle (21st of previous month to 20th of current month)
   const setContractCyclePreset = () => {
     const today = new Date();
     const currentDay = today.getDate();
     let startYear = today.getFullYear();
-    let startMonth = today.getMonth(); // 0-indexed
+    let startMonth = today.getMonth();
     let endYear = today.getFullYear();
     let endMonth = today.getMonth();
 
     if (currentDay >= 21) {
-      // Current cycle ends next month on the 20th
       endMonth = currentMonthToNextMonth(today.getMonth());
       if (endMonth === 0) endYear += 1;
     } else {
-      // Current cycle started last month on the 21st
       startMonth = prevMonthIndex(today.getMonth());
       if (startMonth === 11) startYear -= 1;
     }
 
-    // Helper functions to handle year change boundary
     function currentMonthToNextMonth(m: number) {
       return m === 11 ? 0 : m + 1;
     }
@@ -146,14 +182,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     const startObj = new Date(startYear, startMonth, 21);
     const endObj = new Date(endYear, endMonth, 20);
 
-    // Limit end date to today if the cycle hasn't finished yet
     const todayNoon = new Date();
     todayNoon.setHours(12, 0, 0, 0);
     if (endObj.getTime() > todayNoon.getTime()) {
       endObj.setTime(todayNoon.getTime());
     }
 
-    // Format output as YYYY-MM-DD using local timezone offsets
     const toLocalISO = (d: Date) => {
       const offset = d.getTimezoneOffset();
       const localDate = new Date(d.getTime() - (offset * 60 * 1000));
@@ -310,7 +344,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     return Math.max(0, totalContractTargetHours - totalContractDeliveredHours);
   }, [totalContractTargetHours, totalContractDeliveredHours]);
 
-  const COLORS = ['#f59e0b', '#0284c7', '#8b5cf6', '#ef4444']; // Prog, Prev, Pred, Corr
+  const COLORS = ['#f59e0b', '#0284c7', '#8b5cf6', '#ef4444'];
 
   // Table summary per vehicle
   const fleetSummaryTable = useMemo(() => {
@@ -382,17 +416,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                   .sort((a, b) => b.date.localeCompare(a.date));
   }, [fleetSummaryTable, records]);
 
-  // Get compliance state badge styling
-  const getContractScoreBadge = (score: number) => {
-    if (score >= 95) {
-      return { text: 'EXCELENTE 🟢', bg: 'var(--color-operativo-bg)', color: 'var(--color-operativo)' };
-    } else if (score >= 90) {
-      return { text: 'ESPERADO 🟡', bg: 'var(--color-mantencionprogramada-bg)', color: 'var(--color-mantencionprogramada)' };
-    } else {
-      return { text: 'MÍNIMO 🔴', bg: 'var(--color-mantencioncorrectiva-bg)', color: 'var(--color-mantencioncorrectiva)' };
-    }
-  };
-
   const scoreBadge = getContractScoreBadge(metrics.weightedScore);
 
   return (
@@ -449,7 +472,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         </div>
       </div>
 
-      {/* TABS HEADERS switch between Overview and KPI Evaluation */}
+      {/* TABS SWITCHER */}
       <div id="dashboard-tabs-headers" style={{ display: 'flex', gap: '4px', borderBottom: '2px solid var(--border-color)', marginBottom: '24px', marginTop: '12px' }}>
         <button 
           onClick={() => setActiveTab('overview')}
@@ -494,7 +517,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         </button>
       </div>
 
-      {/* TAB 1: OVERVIEW TAB CONTENT (Existing layout) */}
+      {/* TAB 1: OVERVIEW TAB CONTENT */}
       {activeTab === 'overview' && (
         <>
           {/* Equipment Type Filter Checkboxes Bar */}
@@ -895,17 +918,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         </>
       )}
 
-      {/* TAB 2: KPI EVALUATION TAB CONTENT (New Section) */}
+      {/* TAB 2: KPI EVALUATION TAB CONTENT (With inline editors & Safety KPIs) */}
       {activeTab === 'kpi' && (
         <div>
           {/* Main Contract Score Header Grid */}
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 2fr', gap: '20px', marginBottom: '24px' }}>
-            {/* Weighted score circle */}
             <div className="glass table-card" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '30px' }}>
               <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 Nota Final de Contrato
               </span>
-              <div style={{ fontSize: '3rem', fontWeight: '900', color: scoreBadge.color, margin: '14px 0 6px 0' }}>
+              <div style={{ fontSize: '3.2rem', fontWeight: '900', color: scoreBadge.color, margin: '14px 0 6px 0' }}>
                 {metrics.weightedScore.toFixed(1)}%
               </div>
               <span 
@@ -922,9 +944,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               </span>
             </div>
 
-            {/* Performance breakdown card */}
             <div className="glass table-card" style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '24px' }}>
-              <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '14px' }}>Desempeño de Sub-Evaluaciones Contractuales</h3>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>Desempeño de Sub-Evaluaciones Contractuales</h3>
+                
+                {/* Save button for inline edits */}
+                <button className="btn btn-primary btn-sm" onClick={handleSavePeriodKPIs} style={{ height: '36px' }}>
+                  <Save size={14} />
+                  <span>Guardar Calidad y Seguridad</span>
+                </button>
+              </div>
+
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {/* Flota e Insumos */}
                 <div>
@@ -954,6 +984,29 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                         width: `${kpis.filter(k => k.category === 'calidad').reduce((acc, k) => acc + (metrics.qualityCompliancesMap[k.id] ?? 100), 0) / Math.max(1, kpis.filter(k => k.category === 'calidad').length)}%`, 
                         height: '100%', 
                         background: 'var(--secondary)', 
+                        borderRadius: '4px' 
+                      }}
+                    ></div>
+                  </div>
+                </div>
+
+                {/* Seguridad */}
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                    <span>Seguridad (Ponderación 10%)</span>
+                    <strong>
+                      {(
+                        kpis.filter(k => k.category === 'seguridad').reduce((acc, k) => acc + (metrics.safetyCompliancesMap[k.id] ?? 100), 0) / 
+                        Math.max(1, kpis.filter(k => k.category === 'seguridad').length)
+                      ).toFixed(1)}%
+                    </strong>
+                  </div>
+                  <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+                    <div 
+                      style={{ 
+                        width: `${kpis.filter(k => k.category === 'seguridad').reduce((acc, k) => acc + (metrics.safetyCompliancesMap[k.id] ?? 100), 0) / Math.max(1, kpis.filter(k => k.category === 'seguridad').length)}%`, 
+                        height: '100%', 
+                        background: '#10b981', 
                         borderRadius: '4px' 
                       }}
                     ></div>
@@ -1035,7 +1088,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             </div>
           </div>
 
-          {/* TABLE 2: CALIDAD DE SERVICIO */}
+          {/* TABLE 2: CALIDAD DE SERVICIO (Valor Real editable inline!) */}
           <div className="glass table-card" style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--secondary)', marginBottom: '12px' }}>
               2. Evaluación de Calidad de Servicio
@@ -1050,14 +1103,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
-                    <th style={{ width: '120px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>% Valor Real</th>
                     <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
                   </tr>
                 </thead>
                 <tbody>
                   {kpis.filter(k => k.category === 'calidad').map(k => {
-                    const realVal = metrics.qualityCompliancesMap[k.id] ?? 100.0;
-                    const weightedVal = (k.weight * realVal) / 100;
+                    const realVal = periodCompliancesState[k.id]?.realValue ?? 100.0;
+                    const compPct = periodCompliancesState[k.id]?.compliancePct ?? 100.0;
+                    const weightedVal = (k.weight * compPct) / 100;
 
                     return (
                       <tr key={k.id}>
@@ -1067,7 +1121,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.minVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{realVal.toFixed(1)}%</td>
+                        <td style={{ textAlign: 'center' }}>
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={realVal}
+                              onChange={(e) => {
+                                const newVal = parseFloat(e.target.value) || 0;
+                                setPeriodCompliancesState(prev => ({
+                                  ...prev,
+                                  [k.id]: { realValue: newVal, compliancePct: newVal }
+                                }));
+                              }}
+                              style={{ width: '75px', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}
+                            />
+                            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>%</span>
+                          </div>
+                        </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
                         </td>
@@ -1079,10 +1151,114 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             </div>
           </div>
 
-          {/* TABLE 3: ROSTER / ASSIST */}
+          {/* TABLE 3: SEGURIDAD (Valor Real editable inline!) */}
+          <div className="glass table-card" style={{ marginBottom: '24px' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#10b981', marginBottom: '12px' }}>
+              3. Evaluación de Seguridad
+            </h3>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item Evaluado</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Ponderación</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Medición</th>
+                    <th style={{ width: '120px', textAlign: 'center' }}>Meta</th>
+                    <th style={{ width: '160px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '140px', textAlign: 'center' }}>% Cumplimiento</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kpis.filter(k => k.category === 'seguridad').map(k => {
+                    const realVal = periodCompliancesState[k.id]?.realValue ?? 0;
+                    const compPct = metrics.safetyCompliancesMap[k.id] ?? 100.0;
+                    const weightedVal = (k.weight * compPct) / 100;
+
+                    return (
+                      <tr key={k.id}>
+                        <td style={{ fontWeight: '600' }}>{k.name}</td>
+                        <td style={{ textAlign: 'center' }}>{k.weight}%</td>
+                        <td style={{ textAlign: 'center' }}>{k.unit}</td>
+                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>
+                          {k.id === 'kpi-seg-auditorias' ? '>= 90%' : '0 incidentes'}
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          {k.id === 'kpi-seg-auditorias' ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={realVal}
+                                onChange={(e) => {
+                                  const newVal = parseFloat(e.target.value) || 0;
+                                  let comp = 100.0;
+                                  if (newVal >= 90) comp = 100.0;
+                                  else if (newVal >= 70) comp = 75.0;
+                                  else if (newVal >= 26) comp = 50.0;
+                                  else comp = 0.0;
+
+                                  setPeriodCompliancesState(prev => ({
+                                    ...prev,
+                                    [k.id]: { realValue: newVal, compliancePct: comp }
+                                  }));
+                                }}
+                                style={{ width: '80px', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                              <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>%</span>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
+                              <input
+                                type="number"
+                                min="0"
+                                value={realVal}
+                                onChange={(e) => {
+                                  const newVal = parseInt(e.target.value) || 0;
+                                  let comp = 100.0;
+                                  if (k.id === 'kpi-seg-trirf') {
+                                    if (newVal === 1) comp = 50.0;
+                                    else if (newVal >= 2) comp = 0.0;
+                                  } else if (k.id === 'kpi-seg-notrirf' || k.id === 'kpi-seg-legal') {
+                                    if (newVal === 1) comp = 75.0;
+                                    else if (newVal === 2) comp = 50.0;
+                                    else if (newVal >= 3) comp = 0.0;
+                                  } else if (k.id === 'kpi-seg-incumplimiento') {
+                                    if (newVal === 1 || newVal === 2) comp = 75.0;
+                                    else if (newVal === 3 || newVal === 4) comp = 50.0;
+                                    else if (newVal >= 5) comp = 0.0;
+                                  }
+
+                                  setPeriodCompliancesState(prev => ({
+                                    ...prev,
+                                    [k.id]: { realValue: newVal, compliancePct: comp }
+                                  }));
+                                }}
+                                style={{ width: '70px', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}
+                              />
+                              <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.unit}</span>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: compPct === 100 ? 'var(--color-operativo)' : compPct >= 50 ? 'var(--color-mantencionprogramada)' : 'var(--color-mantencioncorrectiva)' }}>
+                          {compPct.toFixed(1)}%
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
+                          {weightedVal.toFixed(2)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* TABLE 4: ROSTER / ASSIST */}
           <div className="glass table-card">
             <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--color-mantencionpreventiva)', marginBottom: '12px' }}>
-              3. Evaluación de Dotación Semanal
+              4. Evaluación de Dotación Semanal
             </h3>
             <div className="table-wrapper">
               <table>
@@ -1222,3 +1398,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     </div>
   );
 };
+
+function getContractScoreBadge(score: number) {
+  if (score >= 95) {
+    return { text: 'EXCELENTE 🟢', bg: 'var(--color-operativo-bg)', color: 'var(--color-operativo)' };
+  } else if (score >= 90) {
+    return { text: 'ESPERADO 🟡', bg: 'var(--color-mantencionprogramada-bg)', color: 'var(--color-mantencionprogramada)' };
+  } else {
+    return { text: 'MÍNIMO 🔴', bg: 'var(--color-mantencioncorrectiva-bg)', color: 'var(--color-mantencioncorrectiva)' };
+  }
+}

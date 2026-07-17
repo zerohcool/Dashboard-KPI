@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  dbService, parseBlastingTimeToDecimal, getWednesdayStartDate 
+  dbService, parseBlastingTimeToDecimal, getWednesdayStartDate, getRoleShiftType 
 } from '../services/db';
 import type { 
-  Equipment, AvailabilityRecord, ContractKPI, ContractRole
+  Equipment, AvailabilityRecord, ContractRole 
 } from '../services/db';
 import { getPluralType } from '../utils/calculations';
-import { Save, AlertCircle, Copy, Truck, Layers, Settings, Users, Calendar } from 'lucide-react';
+import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar } from 'lucide-react';
 
 const getStatusClass = (status: string) => {
   return status
@@ -34,8 +34,8 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     new Date().toISOString().split('T')[0]
   );
   
-  // Tabs State
-  const [activeSubTab, setActiveSubTab] = useState<'equipos' | 'insumos' | 'calidad' | 'dotacion'>('equipos');
+  // Tabs State (Phase 17: removed 'calidad')
+  const [activeSubTab, setActiveSubTab] = useState<'equipos' | 'insumos' | 'dotacion'>('equipos');
 
   // Tab 1: Equipments State
   const [formState, setFormState] = useState<Record<string, FormRecordState>>({});
@@ -47,16 +47,12 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   const [nitratoStock, setNitratoStock] = useState<number>(200);
   const [matrizStock, setMatrizStock] = useState<number>(200);
 
-  // Tab 3: Service Quality State
-  const [qualityKpis, setQualityKpis] = useState<ContractKPI[]>([]);
-  const [qualityCompliance, setQualityCompliance] = useState<Record<string, number>>({});
-
-  // Tab 4: Weekly Roster/Attendance State
+  // Tab 3: Weekly Roster/Attendance State
   const [activeWeekStart, setActiveWeekStart] = useState<string>('');
   const [roles, setRoles] = useState<ContractRole[]>([]);
   const [weeklyRoster, setWeeklyRoster] = useState<Record<string, number[]>>({});
 
-  // Load blasting time & raw materials & quality compliance on date change
+  // Load blasting time & raw materials on date change
   useEffect(() => {
     const dailyBlasting = dbService.getBlastingTimeForDate(selectedDate);
     setBlastingTime(dailyBlasting);
@@ -64,17 +60,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     const raw = dbService.getRawMaterialsForDate(selectedDate);
     setNitratoStock(raw.nitratoStock);
     setMatrizStock(raw.matrizStock);
-
-    const qualityList = dbService.getContractKPIs().filter(k => k.category === 'calidad');
-    setQualityKpis(qualityList);
-
-    const existingQual = dbService.getQualityComplianceForDate(selectedDate);
-    const initialQualMap: Record<string, number> = {};
-    qualityList.forEach(k => {
-      const found = existingQual.find(q => q.kpiId === k.id);
-      initialQualMap[k.id] = found ? found.compliancePct : 100.0; // default 100%
-    });
-    setQualityCompliance(initialQualMap);
 
     // Sync week start date to matching date
     setActiveWeekStart(getWednesdayStartDate(selectedDate));
@@ -89,9 +74,10 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     const existingAtt = dbService.getWeeklyAttendance(activeWeekStart);
     const initialRoster: Record<string, number[]> = {};
     contractRoles.forEach(r => {
+      const requiredDaily = getRoleShiftType(r.roleName) === '7x7' ? r.requiredCount / 2 : r.requiredCount;
       initialRoster[r.roleName] = existingAtt.attendanceData[r.roleName]
         ? [...existingAtt.attendanceData[r.roleName]]
-        : Array(7).fill(r.requiredCount);
+        : Array(7).fill(requiredDaily);
     });
     setWeeklyRoster(initialRoster);
   }, [activeWeekStart]);
@@ -205,13 +191,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     }));
   };
 
-  const handleQualityCompChange = (kpiId: string, val: number) => {
-    setQualityCompliance(prev => ({
-      ...prev,
-      [kpiId]: Math.min(100, Math.max(0, val))
-    }));
-  };
-
   const handleRosterCellChange = (roleName: string, dayIdx: number, val: number) => {
     setWeeklyRoster(prev => {
       const arr = [...(prev[roleName] || Array(7).fill(0))];
@@ -223,7 +202,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     });
   };
 
-  // Save Daily Records (Availability, Raw Materials, Quality compliance)
+  // Save Daily Records (Availability & Raw Materials only)
   const handleSaveDaily = () => {
     const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
     
@@ -236,7 +215,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       return;
     }
 
-    // Check if there are existing records saved for this date
     const existingRecords = dbService.getAvailabilityForDate(selectedDate);
     const existingRaw = dbService.getRawMaterials().some(r => r.date === selectedDate);
     
@@ -249,19 +227,11 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       }
     }
 
-    // Save parallel promises
     const promises: Promise<any>[] = [
       dbService.saveBlastingTimeForDate(selectedDate, blastingTime),
       dbService.saveAvailabilityRecords(selectedDate, recordsToSave),
       dbService.saveRawMaterialsForDate(selectedDate, nitratoStock, matrizStock)
     ];
-
-    // Save quality compliance values
-    Object.keys(qualityCompliance).forEach(kpiId => {
-      promises.push(
-        dbService.saveQualityComplianceForDate(selectedDate, kpiId, qualityCompliance[kpiId])
-      );
-    });
 
     Promise.all(promises)
       .then(() => {
@@ -345,7 +315,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   const blastingHour = parseInt(blastingTime.split(':')[0], 10) || 19;
   const blastingMin = parseInt(blastingTime.split(':')[1], 10) || 0;
 
-  // Generate week dates labels (Wednesday to Tuesday)
   const getWeekDates = (startStr: string) => {
     if (!startStr) return [];
     const datesList = [];
@@ -366,7 +335,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
 
   return (
     <div>
-      {/* Header section */}
       <div className="page-header" style={{ marginBottom: '16px' }}>
         <div className="page-title-group">
           <h1>Registro de Operaciones Diarias</h1>
@@ -473,7 +441,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         )}
       </div>
 
-      {/* Tabs Menu Navigation */}
+      {/* Tabs Menu Navigation (Phase 17: removed 'calidad') */}
       <div style={{ display: 'flex', borderBottom: '2px solid var(--border-color)', gap: '4px', marginBottom: '24px' }}>
         <button 
           onClick={() => setActiveSubTab('equipos')}
@@ -518,27 +486,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         </button>
 
         <button 
-          onClick={() => setActiveSubTab('calidad')}
-          style={{ 
-            padding: '12px 20px', 
-            fontWeight: '600', 
-            fontSize: '0.9rem', 
-            background: 'none', 
-            border: 'none', 
-            borderBottom: activeSubTab === 'calidad' ? '3px solid var(--primary)' : '3px solid transparent',
-            color: activeSubTab === 'calidad' ? 'var(--primary)' : 'var(--text-secondary)',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            transition: 'all 0.15s ease'
-          }}
-        >
-          <Settings size={16} />
-          <span>3. Calidad de Servicio (KPIs Manuales)</span>
-        </button>
-
-        <button 
           onClick={() => setActiveSubTab('dotacion')}
           style={{ 
             padding: '12px 20px', 
@@ -556,7 +503,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           }}
         >
           <Users size={16} />
-          <span>4. Roster de Dotación (Semanal)</span>
+          <span>3. Roster de Dotación (Semanal)</span>
         </button>
       </div>
 
@@ -764,7 +711,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Nitrato */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '16px', borderBottom: '1px solid var(--border-color)' }}>
               <div>
                 <strong style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>Nitrato de Amonio</strong>
@@ -782,7 +728,6 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
               </div>
             </div>
 
-            {/* Matriz */}
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingBottom: '16px', borderBottom: '1px solid var(--border-color)' }}>
               <div>
                 <strong style={{ fontSize: '1rem', color: 'var(--text-primary)' }}>Matriz</strong>
@@ -817,61 +762,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         </div>
       )}
 
-      {/* TAB 3: CALIDAD DE SERVICIO CONTENT */}
-      {activeSubTab === 'calidad' && (
-        <div className="glass table-card">
-          <h2 className="chart-title">Cumplimiento Calidad de Servicio</h2>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '20px', marginTop: '-8px' }}>
-            Ingrese manualmente el porcentaje de cumplimiento para cada uno de los criterios del contrato de servicio para la fecha seleccionada.
-          </p>
-
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nombre del KPI de Calidad</th>
-                  <th style={{ width: '150px', textAlign: 'center' }}>Mínimo</th>
-                  <th style={{ width: '150px', textAlign: 'center' }}>Esperado</th>
-                  <th style={{ width: '150px', textAlign: 'center' }}>Máximo</th>
-                  <th style={{ width: '200px', textAlign: 'center' }}>% Cumplimiento Actual</th>
-                </tr>
-              </thead>
-              <tbody>
-                {qualityKpis.map(k => (
-                  <tr key={k.id}>
-                    <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{k.name}</td>
-                    <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.minVal}</td>
-                    <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
-                    <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          value={qualityCompliance[k.id] ?? 100}
-                          onChange={(e) => handleQualityCompChange(k.id, parseFloat(e.target.value) || 0)}
-                          style={{ width: '80px', padding: '6px', textAlign: 'center', fontWeight: 'bold' }}
-                        />
-                        <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>%</span>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '20px' }}>
-            <button className="btn btn-primary" onClick={handleSaveDaily}>
-              <Save size={16} />
-              <span>Guardar Registro Diario</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 4: ROSTER DE DOTACION CONTENT */}
+      {/* TAB 3: ROSTER DE DOTACION CONTENT (Phase 17: turn shift validation divided by 2 for 7x7) */}
       {activeSubTab === 'dotacion' && (
         <div className="glass table-card">
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
@@ -892,7 +783,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
               <thead>
                 <tr>
                   <th>Cargo / Función</th>
-                  <th style={{ width: '100px', textAlign: 'center', background: 'rgba(0,0,0,0.02)' }}>Exigida (Contrato)</th>
+                  <th style={{ width: '120px', textAlign: 'center', background: 'rgba(0,0,0,0.02)' }}>Exigida Diario</th>
                   {weekDays.map((d) => (
                     <th key={d.dateStr} style={{ textAlign: 'center', width: '110px' }}>
                       <div style={{ textTransform: 'capitalize', fontSize: '0.8rem' }}>{d.dayName}</div>
@@ -903,27 +794,31 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
               </thead>
               <tbody>
                 {roles.map(r => {
-                  const arr = weeklyRoster[r.roleName] || Array(7).fill(r.requiredCount);
+                  const shift = getRoleShiftType(r.roleName);
+                  const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+                  const arr = weeklyRoster[r.roleName] || Array(7).fill(requiredDaily);
+                  
                   return (
                     <tr key={r.roleName}>
                       <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{r.roleName}</td>
-                      <td style={{ textAlign: 'center', fontWeight: 'bold', background: 'rgba(0,0,0,0.02)', color: 'var(--text-secondary)' }}>
-                        {r.requiredCount} pers
+                      <td style={{ textAlign: 'center', fontWeight: 'bold', background: 'rgba(0,0,0,0.02)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                        {requiredDaily} pers
                       </td>
                       {arr.map((val, idx) => (
                         <td key={idx} style={{ textAlign: 'center' }}>
                           <input
                             type="number"
                             min="0"
+                            step={shift === '7x7' ? '0.5' : '1'}
                             value={val}
-                            onChange={(e) => handleRosterCellChange(r.roleName, idx, parseInt(e.target.value) || 0)}
+                            onChange={(e) => handleRosterCellChange(r.roleName, idx, parseFloat(e.target.value) || 0)}
                             style={{ 
-                              width: '60px', 
+                              width: '65px', 
                               padding: '6px', 
                               textAlign: 'center',
-                              border: val < r.requiredCount ? '1px solid var(--color-mantencioncorrectiva)' : '1px solid var(--border-color)',
-                              background: val < r.requiredCount ? 'var(--color-mantencioncorrectiva-bg)' : 'none',
-                              color: val < r.requiredCount ? 'var(--color-mantencioncorrectiva)' : 'inherit',
+                              border: val < requiredDaily ? '1px solid var(--color-mantencioncorrectiva)' : '1px solid var(--border-color)',
+                              background: val < requiredDaily ? 'var(--color-mantencioncorrectiva-bg)' : 'none',
+                              color: val < requiredDaily ? 'var(--color-mantencioncorrectiva)' : 'inherit',
                               fontWeight: '600'
                             }}
                           />
@@ -939,7 +834,11 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           <div style={{ display: 'flex', gap: '10px', background: 'var(--primary-glow)', padding: '14px', borderRadius: '12px', color: 'var(--text-primary)', fontSize: '0.85rem', marginTop: '20px' }}>
             <AlertCircle size={20} style={{ flexShrink: 0, color: 'var(--primary)' }} />
             <div>
-              <strong>Indicador de Alerta:</strong> Los campos de asistencia diaria se marcarán en **rojo** si la asistencia ingresada es menor al personal teórico exigido por contrato para esa función, permitiendo identificar faltas de personal instantáneamente.
+              <strong>Regla de Turnos Contractuales:</strong>
+              <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+                <li>Los cargos con jornada **7x7** se dividen entre dos grupos (Turno A y Turno B). Por lo tanto, la exigencia diaria de asistencia es la **mitad (50%)** del total contratado.</li>
+                <li>Los cargos con jornada **4x3** no se dividen, exigiéndose el **100%** de asistencia en sus días hábiles.</li>
+              </ul>
             </div>
           </div>
         </div>

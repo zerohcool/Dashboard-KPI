@@ -1,9 +1,9 @@
 import type { 
   Equipment, AvailabilityRecord, ContractSettings, 
   DailyRawMaterials, ContractKPI, DailyQualityCompliance, 
-  ContractRole, WeeklyAttendance 
+  ContractRole, WeeklyAttendance, PeriodCompliance 
 } from '../services/db';
-import { getWednesdayStartDate } from '../services/db';
+import { getWednesdayStartDate, getRoleShiftType } from '../services/db';
 
 export const getPluralType = (type: string): string => {
   switch (type) {
@@ -71,7 +71,6 @@ export const calculateTypeDailyHours = (
 
   const B = Math.max(0, N - requiredCount);
 
-  // Collect down intervals
   const downIntervals: Interval[] = [];
   records.forEach(r => {
     if (r.status !== 'Operativo') {
@@ -152,7 +151,8 @@ export const calculateMetrics = (
   qualityCompliances: DailyQualityCompliance[] = [],
   weeklyAttendances: WeeklyAttendance[] = [],
   kpis: ContractKPI[] = [],
-  roles: ContractRole[] = []
+  roles: ContractRole[] = [],
+  periodCompliances: PeriodCompliance[] = [] // NEW ARGUMENT (PHASE 17)
 ): {
   overallPhysical: number;
   overallContractual: number;
@@ -160,13 +160,14 @@ export const calculateMetrics = (
   dailyHistory: DailyAvailability[];
   faultBreakdown: { name: string; value: number }[];
   totalBackupCoveredHours: number;
-  // NEW OUTPUTS
   rawMaterialsCompliance: number;
   qualityCompliancesMap: Record<string, number>;
+  safetyCompliancesMap: Record<string, number>; // NEW OUTPUT (PHASE 17)
   attendanceCompliance: number;
   weightedScore: number;
 } => {
   const types = selectedTypes;
+  void qualityCompliances;
   
   const getRequiredCount = (type: Equipment['type']): number => {
     switch (type) {
@@ -177,7 +178,6 @@ export const calculateMetrics = (
     }
   };
 
-  // Group records by date
   const recordsByDate: Record<string, AvailabilityRecord[]> = {};
   records.forEach(r => {
     if (!recordsByDate[r.date]) {
@@ -188,7 +188,6 @@ export const calculateMetrics = (
 
   const dates = Object.keys(recordsByDate).sort();
 
-  // Initialize metrics by type
   const byType = {} as Record<Equipment['type'], TypeMetrics>;
   types.forEach(t => {
     const eqList = fleet.filter(eq => eq.type === t);
@@ -203,7 +202,6 @@ export const calculateMetrics = (
     };
   });
 
-  // Calculate daily history
   const dailyHistory: DailyAvailability[] = [];
   let totalContractTargetHours = 0;
   let totalContractDeliveredHours = 0;
@@ -309,11 +307,7 @@ export const calculateMetrics = (
     faultBreakdown.push({ name: 'Sin fallas', value: 0 });
   }
 
-  // ==========================================
-  // NEW CUMULATIVE KPI CALCULATIONS (PHASE 16)
-  // ==========================================
-  
-  // 1. Raw Materials (Insumos) compliance
+  // 1. Raw Materials compliance
   let rawMaterialsCompliance = 100.0;
   if (startDate && endDate && dates.length > 0) {
     let dayCompSum = 0;
@@ -328,21 +322,55 @@ export const calculateMetrics = (
     rawMaterialsCompliance = dayCompSum / dates.length;
   }
 
-  // 2. Service Quality compliance map
+  // 2. Service Quality compliance map (read from periodCompliances first)
   const qualityCompliancesMap: Record<string, number> = {};
   const qualityKpis = kpis.filter(k => k.category === 'calidad');
   
   qualityKpis.forEach(k => {
-    const recordsForKpi = qualityCompliances.filter(q => q.kpiId === k.id);
-    if (recordsForKpi.length > 0) {
-      const sum = recordsForKpi.reduce((acc, curr) => acc + curr.compliancePct, 0);
-      qualityCompliancesMap[k.id] = sum / recordsForKpi.length;
+    const pRecord = periodCompliances.find(p => p.kpiId === k.id);
+    if (pRecord) {
+      qualityCompliancesMap[k.id] = pRecord.compliancePct;
     } else {
-      qualityCompliancesMap[k.id] = 100.0; // default to 100% compliance
+      qualityCompliancesMap[k.id] = 100.0; // default 100% compliance
     }
   });
 
-  // 3. Attendance (Dotación) compliance
+  // 3. Safety compliance calculations (NEW PHASE 17)
+  const safetyCompliancesMap: Record<string, number> = {};
+  const safetyKpis = kpis.filter(k => k.category === 'seguridad');
+
+  safetyKpis.forEach(k => {
+    const pRecord = periodCompliances.find(p => p.kpiId === k.id);
+    const realValue = pRecord ? pRecord.realValue : 0; // default 0 incidents/infractions
+
+    let comp = 100.0;
+    if (k.id === 'kpi-seg-trirf') {
+      if (realValue === 1) comp = 50.0;
+      else if (realValue >= 2) comp = 0.0;
+    } 
+    else if (k.id === 'kpi-seg-notrirf' || k.id === 'kpi-seg-legal') {
+      if (realValue === 1) comp = 75.0;
+      else if (realValue === 2) comp = 50.0;
+      else if (realValue >= 3) comp = 0.0;
+    } 
+    else if (k.id === 'kpi-seg-auditorias') {
+      // realValue represents the audit score percentage (default 100)
+      const score = pRecord ? pRecord.realValue : 100.0;
+      if (score >= 90.0) comp = 100.0;
+      else if (score >= 70.0) comp = 75.0;
+      else if (score >= 26.0) comp = 50.0;
+      else comp = 0.0;
+    } 
+    else if (k.id === 'kpi-seg-incumplimiento') {
+      if (realValue === 1 || realValue === 2) comp = 75.0;
+      else if (realValue === 3 || realValue === 4) comp = 50.0;
+      else if (realValue >= 5) comp = 0.0;
+    }
+
+    safetyCompliancesMap[k.id] = comp;
+  });
+
+  // 4. Attendance compliance with shift-split turn division (7x7 divided by 2)
   let attendanceCompliance = 100.0;
   if (startDate && endDate && dates.length > 0 && roles.length > 0) {
     let totalAttendedSum = 0;
@@ -353,16 +381,18 @@ export const calculateMetrics = (
       const att = weeklyAttendances.find(w => w.weekStartDate === wedDate);
       
       const d = new Date(dateStr + 'T12:00:00');
-      const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0, Tuesday is 6
+      const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0
 
       roles.forEach(r => {
-        const required = r.requiredCount;
+        // Divide by 2 for 7x7 cargos
+        const requiredDaily = getRoleShiftType(r.roleName) === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+        
         const attended = (att && att.attendanceData[r.roleName])
           ? att.attendanceData[r.roleName][dayIdx]
-          : required; // default to fully compliant if no log exists
+          : requiredDaily; // default compliant if no logs exist
         
         totalAttendedSum += attended;
-        totalRequiredSum += required;
+        totalRequiredSum += requiredDaily;
       });
     });
 
@@ -371,12 +401,11 @@ export const calculateMetrics = (
       : 100.0;
   }
 
-  // 4. Final Weighted Score calculation
+  // 5. Final Weighted Score calculation
   let totalWeight = 0;
   let weightedSum = 0;
 
   kpis.forEach(k => {
-    // Check if the KPI is active based on type filters
     let isActive = true;
     if (k.id === 'kpi-camiones' && !selectedTypes.includes('Camión Fábrica')) isActive = false;
     if (k.id === 'kpi-cargadores' && !selectedTypes.includes('Cargador Frontal')) isActive = false;
@@ -396,6 +425,8 @@ export const calculateMetrics = (
         compliance = qualityCompliancesMap[k.id] ?? 100.0;
       } else if (k.id === 'kpi-dotacion-comprometida') {
         compliance = attendanceCompliance;
+      } else if (k.category === 'seguridad') {
+        compliance = safetyCompliancesMap[k.id] ?? 100.0;
       }
 
       totalWeight += k.weight;
@@ -412,9 +443,9 @@ export const calculateMetrics = (
     dailyHistory,
     faultBreakdown,
     totalBackupCoveredHours,
-    // NEW OUTPUTS
     rawMaterialsCompliance,
     qualityCompliancesMap,
+    safetyCompliancesMap,
     attendanceCompliance,
     weightedScore
   };

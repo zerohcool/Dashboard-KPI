@@ -29,7 +29,6 @@ export interface AvailabilityRecord {
   comment: string;
 }
 
-// NEW INTERFACES FOR PHASE 16
 export interface DailyRawMaterials {
   date: string;
   nitratoStock: number;
@@ -38,7 +37,7 @@ export interface DailyRawMaterials {
 
 export interface ContractKPI {
   id: string;
-  category: 'disponibilidad' | 'calidad' | 'dotacion';
+  category: 'disponibilidad' | 'calidad' | 'dotacion' | 'seguridad';
   name: string;
   weight: number;
   unit: string;
@@ -64,6 +63,15 @@ export interface WeeklyAttendance {
   attendanceData: Record<string, number[]>; // Maps roleName -> 7 numbers (Wednesday to Tuesday)
 }
 
+// NEW INTERFACE FOR PERIOD COMPLIANCE (PHASE 17)
+export interface PeriodCompliance {
+  startDate: string;
+  endDate: string;
+  kpiId: string;
+  realValue: number;
+  compliancePct: number;
+}
+
 const STORAGE_KEYS = {
   EQUIPMENT: 'disponibilidad_equipos_fleet',
   SETTINGS: 'disponibilidad_equipos_settings',
@@ -72,7 +80,8 @@ const STORAGE_KEYS = {
   CONTRACT_KPIS: 'disponibilidad_equipos_contract_kpis',
   QUALITY_COMPLIANCE: 'disponibilidad_equipos_quality_compliance',
   CONTRACT_ROLES: 'disponibilidad_equipos_contract_roles',
-  WEEKLY_ATTENDANCE: 'disponibilidad_equipos_weekly_attendance'
+  WEEKLY_ATTENDANCE: 'disponibilidad_equipos_weekly_attendance',
+  PERIOD_COMPLIANCE: 'disponibilidad_equipos_period_compliance'
 };
 
 const DEFAULT_SETTINGS: ContractSettings = {
@@ -82,14 +91,14 @@ const DEFAULT_SETTINGS: ContractSettings = {
   requiredPickups: 8
 };
 
-// Seed KPIs list
+// Seed KPIs list with 5 new safety KPIs (sum of safety is 10%)
 const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
-  // Disponibilidad e Insumos
+  // Disponibilidad e Insumos (31%)
   { id: 'kpi-camiones', category: 'disponibilidad', name: 'Disponibilidad de Camiones Fabrica', weight: 10, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-cargadores', category: 'disponibilidad', name: 'Disponibilidad de Cargador frontales (Tapapozos)', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-polvorines', category: 'disponibilidad', name: 'Disponibilidad de Polvorines Móviles', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-insumos', category: 'disponibilidad', name: 'Disponibilidad de Insumos', weight: 5, unit: 'ton', periodicity: 'diario', minVal: '170', expectedVal: '200', maxVal: '200' },
-  // Calidad de Servicio
+  // Calidad de Servicio (49%)
   { id: 'kpi-innovacion', category: 'calidad', name: 'Eficiencia: Índice de innovación y pruebas', weight: 5, unit: 'informe', periodicity: 'mensual', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-costos', category: 'calidad', name: 'Eficiencia: Control de costos USD/ton-tron', weight: 10, unit: 'informe', periodicity: 'semanal', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-horario-tronadura', category: 'calidad', name: 'cumplimiento del horario de tronadura', weight: 5, unit: 'minutos', periodicity: 'Diaria', minVal: '15 minutos de perdida', expectedVal: '0 minutos de perdida', maxVal: 'Estar preparado antes de la hora' },
@@ -101,24 +110,33 @@ const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
   { id: 'kpi-flyrock', category: 'calidad', name: 'impactos en equipos por flyrock', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '>0', expectedVal: '0', maxVal: '0' },
   { id: 'kpi-vod', category: 'calidad', name: 'Medición y cumplimiento de VOD en los productos', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '4', expectedVal: '6', maxVal: '8' },
   { id: 'kpi-gases', category: 'calidad', name: 'Control de gases nitrosos', weight: 3, unit: 'evento', periodicity: 'mensual', minVal: '>1', expectedVal: '1', maxVal: '1' },
-  // Dotación
-  { id: 'kpi-dotacion-comprometida', category: 'dotacion', name: 'Asegurar la dotación comprometida para la operación normal de la flota', weight: 10, unit: '%', periodicity: 'Semanal', minVal: '90% de la dotación', expectedVal: '95% de la dotación', maxVal: '100% de la dotación' }
+  // Dotación (10%)
+  { id: 'kpi-dotacion-comprometida', category: 'dotacion', name: 'Asegurar la dotación comprometida para la operación normal de la flota', weight: 10, unit: '%', periodicity: 'Semanal', minVal: '90% de la dotación', expectedVal: '95% de la dotación', maxVal: '100% de la dotación' },
+  // Seguridad (10%) - Nuevos KPIs
+  { id: 'kpi-seg-trirf', category: 'seguridad', name: 'Incidentes que afectan al TRIRF', weight: 4, unit: 'incidentes', periodicity: 'mensual', minVal: '2', expectedVal: '0', maxVal: '0' },
+  { id: 'kpi-seg-notrirf', category: 'seguridad', name: 'Incidentes que no afectan al TRIRF', weight: 3, unit: 'incidentes', periodicity: 'mensual', minVal: '3', expectedVal: '0', maxVal: '0' },
+  { id: 'kpi-seg-legal', category: 'seguridad', name: 'Cumplimiento legal (fiscalizaciones estatales)', weight: 1, unit: 'incidentes', periodicity: 'mensual', minVal: '3', expectedVal: '0', maxVal: '0' },
+  { id: 'kpi-seg-auditorias', category: 'seguridad', name: 'Auditorias Internas', weight: 1, unit: 'audit_score', periodicity: 'mensual', minVal: '25%', expectedVal: '90%', maxVal: '100%' },
+  { id: 'kpi-seg-incumplimiento', category: 'seguridad', name: 'Incumplimiento de temas generales SSMA', weight: 1, unit: 'incidentes', periodicity: 'mensual', minVal: '4', expectedVal: '0', maxVal: '0' }
 ];
 
 const DEFAULT_CONTRACT_ROLES: ContractRole[] = [
-  { roleName: 'Administrador', requiredCount: 1 },
-  { roleName: 'Jefe de Operaciones', requiredCount: 1 },
-  { roleName: 'Supervisor de tronadora', requiredCount: 1 },
-  { roleName: 'Capataz de tronadura', requiredCount: 1 },
-  { roleName: 'HSEC', requiredCount: 1 },
-  { roleName: 'Chofer Operador Camion fabrica', requiredCount: 6 },
-  { roleName: 'Chofer Operador Equipo Auxiliar', requiredCount: 3 },
-  { roleName: 'Cargador de Tiros', requiredCount: 4 },
-  { roleName: 'Encargado de Patio', requiredCount: 1 },
-  { roleName: 'Tecnico en Mantenimiento', requiredCount: 2 },
-  { roleName: 'Administrativo', requiredCount: 1 },
-  { roleName: 'Ingeniero de tronadura', requiredCount: 1 },
-  { roleName: 'Asistencia Tecnica', requiredCount: 1 }
+  { roleName: 'Administrador (4x3)', requiredCount: 1 },
+  { roleName: 'HSEC (4x3)', requiredCount: 1 },
+  { roleName: 'Asistencia Tecnica (4x3)', requiredCount: 1 },
+  { roleName: 'Ingeniero de tronadura (4x3)', requiredCount: 1 },
+  { roleName: 'Jefe de Operaciones (7x7)', requiredCount: 2 },
+  { roleName: 'Supervisor de tronadura (7x7)', requiredCount: 2 },
+  { roleName: 'Capataz de tronadura (7x7)', requiredCount: 2 },
+  { roleName: 'HSEC (7x7)', requiredCount: 2 },
+  { roleName: 'Chofer Operador Camion fabrica (7x7)', requiredCount: 12 },
+  { roleName: 'Chofer Operador Equipo Auxiliar (7x7)', requiredCount: 6 },
+  { roleName: 'Cargador de Tiros (7x7)', requiredCount: 8 },
+  { roleName: 'Encargado de Patio (7x7)', requiredCount: 2 },
+  { roleName: 'Tecnico en Mantenimiento (7x7)', requiredCount: 4 },
+  { roleName: 'Administrativo (7x7)', requiredCount: 2 },
+  { roleName: 'Ingeniero de tronadura (7x7)', requiredCount: 2 },
+  { roleName: 'Asistencia Tecnica (7x7)', requiredCount: 2 }
 ];
 
 const generateId = () => Math.random().toString(36).substr(2, 9).toUpperCase();
@@ -141,6 +159,11 @@ export const parseBlastingTimeToDecimal = (timeStr: string): number => {
   }
   const decimalHour = parseFloat(timeStr);
   return isNaN(decimalHour) ? 19 : decimalHour;
+};
+
+// Helper to check if a cargo name corresponds to 7x7 shift
+export const getRoleShiftType = (roleName: string): '4x3' | '7x7' => {
+  return roleName.includes('7x7') ? '7x7' : '4x3';
 };
 
 export const dbService = {
@@ -266,6 +289,19 @@ export const dbService = {
         attendanceData: row.attendance_data
       }));
       localStorage.setItem(STORAGE_KEYS.WEEKLY_ATTENDANCE, JSON.stringify(mapped));
+    }
+
+    // 10. Fetch period compliance (NEW PHASE 17)
+    const { data: periodData, error: periodErr } = await supabase.from('period_compliance').select('*');
+    if (!periodErr && periodData) {
+      const mapped: PeriodCompliance[] = periodData.map((row: any) => ({
+        startDate: row.start_date,
+        endDate: row.end_date,
+        kpiId: row.kpi_id,
+        realValue: parseFloat(row.real_value),
+        compliancePct: parseFloat(row.compliance_pct)
+      }));
+      localStorage.setItem(STORAGE_KEYS.PERIOD_COMPLIANCE, JSON.stringify(mapped));
     }
   },
 
@@ -510,7 +546,6 @@ export const dbService = {
     }
   },
 
-  // NEW DATABASE METHODS FOR PHASE 16
   getContractKPIs(): ContractKPI[] {
     const data = localStorage.getItem(STORAGE_KEYS.CONTRACT_KPIS);
     if (!data) {
@@ -549,7 +584,7 @@ export const dbService = {
   getRawMaterialsForDate(date: string): DailyRawMaterials {
     const all = this.getRawMaterials();
     const found = all.find(r => r.date === date);
-    return found || { date, nitratoStock: 200, matrizStock: 200 }; // default 200 ton
+    return found || { date, nitratoStock: 200, matrizStock: 200 };
   },
 
   getRawMaterialsForRange(startDate: string, endDate: string): DailyRawMaterials[] {
@@ -631,12 +666,12 @@ export const dbService = {
     const list: WeeklyAttendance[] = data ? JSON.parse(data) : [];
     const found = list.find(w => w.weekStartDate === weekStartDate);
     
-    // Default attendance with required counts if not registered
     if (!found) {
       const roles = this.getContractRoles();
       const defaultData: Record<string, number[]> = {};
       roles.forEach(r => {
-        defaultData[r.roleName] = Array(7).fill(r.requiredCount);
+        const requiredDaily = getRoleShiftType(r.roleName) === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+        defaultData[r.roleName] = Array(7).fill(requiredDaily);
       });
       return { weekStartDate, attendanceData: defaultData };
     }
@@ -658,6 +693,35 @@ export const dbService = {
       const { error } = await supabase.from('weekly_attendance').upsert({
         week_start_date: weekStartDate,
         attendance_data: attendanceData
+      });
+      if (error) throw error;
+    }
+  },
+
+  // NEW CRUD METHODS FOR PERIOD COMPLIANCE (PHASE 17)
+  getPeriodCompliances(): PeriodCompliance[] {
+    const data = localStorage.getItem(STORAGE_KEYS.PERIOD_COMPLIANCE);
+    if (!data) return [];
+    return JSON.parse(data);
+  },
+
+  getPeriodCompliancesForRange(startDate: string, endDate: string): PeriodCompliance[] {
+    const all = this.getPeriodCompliances();
+    return all.filter(p => p.startDate === startDate && p.endDate === endDate);
+  },
+
+  async savePeriodCompliance(startDate: string, endDate: string, kpiId: string, realValue: number, compliancePct: number): Promise<void> {
+    const all = this.getPeriodCompliances().filter(p => !(p.startDate === startDate && p.endDate === endDate && p.kpiId === kpiId));
+    all.push({ startDate, endDate, kpiId, realValue, compliancePct });
+    localStorage.setItem(STORAGE_KEYS.PERIOD_COMPLIANCE, JSON.stringify(all));
+
+    if (supabase) {
+      const { error } = await supabase.from('period_compliance').upsert({
+        start_date: startDate,
+        end_date: endDate,
+        kpi_id: kpiId,
+        real_value: realValue,
+        compliance_pct: compliancePct
       });
       if (error) throw error;
     }

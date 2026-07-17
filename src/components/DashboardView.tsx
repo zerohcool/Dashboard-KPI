@@ -1,0 +1,909 @@
+import React, { useState, useMemo, useRef } from 'react';
+import { dbService } from '../services/db';
+import type { Equipment } from '../services/db';
+import { calculateMetrics, exportToCSV, getPluralType } from '../utils/calculations';
+import { 
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, Cell, PieChart, Pie
+} from 'recharts';
+import { 
+  Download, FileDown, Clock, X, AlertTriangle
+} from 'lucide-react';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
+
+interface DashboardViewProps {
+  fleet: Equipment[];
+  addToast: (text: string, type: 'success' | 'error') => void;
+}
+
+const getStatusClass = (status: string) => {
+  return status
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '');
+};
+
+const formatToDDMMYYYY = (dateStr: string) => {
+  const parts = dateStr.split('-');
+  if (parts.length === 3) {
+    return `${parts[2]}-${parts[1]}-${parts[0]}`;
+  }
+  return dateStr;
+};
+
+export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast }) => {
+  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  
+  // Set default range to last 14 days
+  const defaultStartDate = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 14);
+    return d.toISOString().split('T')[0];
+  }, []);
+
+  const [startDate, setStartDate] = useState(defaultStartDate);
+  const [endDate, setEndDate] = useState(todayStr);
+  const [exportingPDF, setExportingPDF] = useState(false);
+  const [modalEqId, setModalEqId] = useState<string | null>(null);
+  
+  // Selective equipment types state
+  const [selectedTypes, setSelectedTypes] = useState<Equipment['type'][]>(
+    ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta']
+  );
+
+  const dashboardRef = useRef<HTMLDivElement>(null);
+
+  // Fetch contract settings & availability records for range
+  const settings = useMemo(() => dbService.getContractSettings(), [fleet]);
+  const records = useMemo(() => dbService.getAvailabilityRecords(startDate, endDate), [startDate, endDate, fleet]);
+
+  // Calculate days in range
+  const daysCount = useMemo(() => {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
+  }, [startDate, endDate]);
+
+  // Compute metrics with selectedTypes
+  const metrics = useMemo(() => {
+    return calculateMetrics(fleet, records, settings, daysCount, selectedTypes);
+  }, [fleet, records, settings, daysCount, selectedTypes]);
+
+  // Quick Range Presets
+  const setRangePreset = (days: number) => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(end.getDate() - days + 1);
+    
+    setStartDate(start.toISOString().split('T')[0]);
+    setEndDate(end.toISOString().split('T')[0]);
+  };
+
+  const setMonthPreset = () => {
+    const date = new Date();
+    const firstDay = new Date(date.getFullYear(), date.getMonth(), 1);
+    const lastDay = new Date(date.getFullYear(), date.getMonth() + 1, 0);
+    
+    setStartDate(firstDay.toISOString().split('T')[0]);
+    const endStr = lastDay > date ? date.toISOString().split('T')[0] : lastDay.toISOString().split('T')[0];
+    setEndDate(endStr);
+  };
+
+  // Preset: 21st of last month to 20th of this month (max today)
+  const setContractPeriodPreset = () => {
+    const today = new Date();
+    let startYear = today.getFullYear();
+    let startMonth = today.getMonth();
+    
+    if (today.getDate() >= 21) {
+      // Starts on the 21st of the current month
+    } else {
+      // Starts on the 21st of the previous month
+      startMonth -= 1;
+      if (startMonth < 0) {
+        startMonth = 11;
+        startYear -= 1;
+      }
+    }
+    
+    const startObj = new Date(startYear, startMonth, 21);
+    
+    let endMonth = startMonth + 1;
+    let endYear = startYear;
+    if (endMonth > 11) {
+      endMonth = 0;
+      endYear += 1;
+    }
+    const maxEndObj = new Date(endYear, endMonth, 20);
+    const endObj = today < maxEndObj ? today : maxEndObj;
+
+    const toLocalISO = (date: Date) => {
+      const offset = date.getTimezoneOffset();
+      const localDate = new Date(date.getTime() - (offset * 60 * 1000));
+      return localDate.toISOString().split('T')[0];
+    };
+
+    setStartDate(toLocalISO(startObj));
+    setEndDate(toLocalISO(endObj));
+  };
+
+  const toggleTypeSelection = (type: Equipment['type']) => {
+    setSelectedTypes(prev => {
+      if (prev.includes(type)) {
+        if (prev.length === 1) {
+          addToast('Debe evaluar al menos un tipo de equipo.', 'error');
+          return prev;
+        }
+        return prev.filter(t => t !== type);
+      } else {
+        return [...prev, type];
+      }
+    });
+  };
+
+  // PDF Export
+  const handleExportPDF = async () => {
+    if (!dashboardRef.current) return;
+    setExportingPDF(true);
+    addToast('Generando PDF del Dashboard...', 'success');
+
+    try {
+      const exportButtons = document.getElementById('export-actions-panel');
+      const checkboxPanel = document.getElementById('type-checkboxes-panel');
+      if (exportButtons) exportButtons.style.display = 'none';
+      if (checkboxPanel) checkboxPanel.style.display = 'none';
+
+      const canvas = await html2canvas(dashboardRef.current, {
+        scale: 2,
+        useCORS: true,
+        backgroundColor: document.body.classList.contains('dark-theme') ? '#0b0f19' : '#f8fafc',
+        logging: false,
+      });
+
+      if (exportButtons) exportButtons.style.display = 'flex';
+      if (checkboxPanel) checkboxPanel.style.display = 'flex';
+
+      const imgData = canvas.toDataURL('image/png');
+      const pdf = new jsPDF('p', 'mm', 'a4');
+      const imgWidth = 210;
+      const pageHeight = 297;
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft >= 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      pdf.save(`KPI-Disponibilidad-${startDate}-a-${endDate}.pdf`);
+      addToast('PDF descargado correctamente.', 'success');
+    } catch (err) {
+      console.error(err);
+      addToast('Error al generar el PDF.', 'error');
+    } finally {
+      setExportingPDF(false);
+    }
+  };
+
+  // Excel/CSV Export
+  const handleExportCSV = () => {
+    const activeFleet = fleet.filter(eq => selectedTypes.includes(eq.type));
+    const activeEqIds = new Set(activeFleet.map(eq => eq.id));
+    const filteredRecords = records.filter(r => activeEqIds.has(r.equipmentId));
+    
+    exportToCSV(activeFleet, filteredRecords, `disponibilidad_flota_${startDate}_a_${endDate}.csv`);
+    addToast('Archivo Excel (CSV) descargado.', 'success');
+  };
+
+  // Convert map metrics to array for charts
+  const barChartData = useMemo(() => {
+    return Object.values(metrics.byType).map(t => ({
+      name: t.type,
+      'Disponibilidad (%)': parseFloat(t.contractualAvailability.toFixed(1))
+    }));
+  }, [metrics]);
+
+  // Format date for history chart: YYYY-MM-DD to DD/MM
+  const historyChartData = useMemo(() => {
+    return metrics.dailyHistory.map(day => {
+      const parts = day.date.split('-');
+      const formattedDate = parts.length === 3 ? `${parts[2]}/${parts[1]}` : day.date;
+      return {
+        date: formattedDate,
+        'Disponibilidad (%)': parseFloat(day.contractAvail.toFixed(1))
+      };
+    });
+  }, [metrics]);
+
+  const totalContractTargetHours = useMemo(() => {
+    let sum = 0;
+    selectedTypes.forEach(t => {
+      const req = t === 'Camión Fábrica' ? settings.requiredFactoryTrucks
+                : t === 'Cargador Frontal' ? settings.requiredFrontLoaders
+                : t === 'Polvorín Móvil' ? settings.requiredPowderKegs
+                : settings.requiredPickups;
+      sum += req * 12 * daysCount;
+    });
+    return sum;
+  }, [selectedTypes, settings, daysCount]);
+
+  const totalContractDeliveredHours = useMemo(() => {
+    let sum = 0;
+    const recordsByDate: Record<string, typeof records> = {};
+    records.forEach(r => {
+      if (!recordsByDate[r.date]) recordsByDate[r.date] = [];
+      recordsByDate[r.date].push(r);
+    });
+
+    const dates = Object.keys(recordsByDate);
+    if (dates.length === 0) return 0;
+
+    dates.forEach(date => {
+      const dayRecords = recordsByDate[date];
+      selectedTypes.forEach(t => {
+        const req = t === 'Camión Fábrica' ? settings.requiredFactoryTrucks
+                  : t === 'Cargador Frontal' ? settings.requiredFrontLoaders
+                  : t === 'Polvorín Móvil' ? settings.requiredPowderKegs
+                  : settings.requiredPickups;
+        
+        const typeRecords = dayRecords.filter(r => {
+          const eq = fleet.find(f => f.id === r.equipmentId);
+          return eq?.type === t;
+        });
+
+        let typeDayAvail = 0;
+        typeRecords.forEach(r => { typeDayAvail += r.hoursAvailable; });
+        sum += Math.min(typeDayAvail, req * 12);
+      });
+    });
+
+    return sum;
+  }, [records, selectedTypes, settings, fleet]);
+
+  const totalHoursDown = useMemo(() => {
+    let sum = 0;
+    const activeEqIds = new Set(fleet.filter(eq => selectedTypes.includes(eq.type)).map(eq => eq.id));
+    
+    records.forEach(r => {
+      if (activeEqIds.has(r.equipmentId)) {
+        sum += (r.hoursOutOfService - (r.hoursPostBlasting || 0));
+      }
+    });
+    return sum;
+  }, [records, fleet, selectedTypes]);
+
+  const COLORS = ['#f59e0b', '#0284c7', '#8b5cf6', '#ef4444']; // Prog, Prev, Pred, Corr
+
+  // Table summary per vehicle
+  const fleetSummaryTable = useMemo(() => {
+    const activeFleet = fleet.filter(eq => selectedTypes.includes(eq.type));
+    const allItems = activeFleet.map(eq => {
+      const eqRecords = records.filter(r => r.equipmentId === eq.id);
+      
+      let availHours = 0;
+      let downHours = 0;
+      let lastStatus = 'Operativo';
+
+      eqRecords.forEach(r => {
+        availHours += r.hoursAvailable;
+        downHours += (r.hoursOutOfService - (r.hoursPostBlasting || 0));
+      });
+
+      const totalPossibleHours = eqRecords.length * 12;
+      const equipmentAvailability = eqRecords.length > 0
+        ? (availHours / totalPossibleHours) * 100 
+        : null;
+
+      if (eqRecords.length > 0) {
+        const sorted = [...eqRecords].sort((a, b) => b.date.localeCompare(a.date));
+        lastStatus = sorted[0].status;
+      } else {
+        lastStatus = 'No Programado';
+      }
+
+      return {
+        id: eq.id,
+        name: eq.name,
+        type: eq.type,
+        patent: eq.patent,
+        availHours,
+        downHours,
+        availability: equipmentAvailability,
+        lastStatus
+      };
+    });
+    return allItems.filter((row: any) => row.availability !== null) as {
+      id: string;
+      name: string;
+      type: Equipment['type'];
+      patent: string;
+      availHours: number;
+      downHours: number;
+      availability: number;
+      lastStatus: string;
+    }[];
+  }, [fleet, records, selectedTypes]);
+
+  // Modal detailed data logic
+  const modalEq = useMemo(() => {
+    if (!modalEqId) return null;
+    return fleet.find(e => e.id === modalEqId);
+  }, [modalEqId, fleet]);
+
+  const modalRecords = useMemo(() => {
+    if (!modalEqId) return [];
+    return records.filter(r => r.equipmentId === modalEqId && r.status !== 'Operativo')
+                  .sort((a, b) => b.date.localeCompare(a.date));
+  }, [modalEqId, records]);
+
+  const failingEquipmentsRecords = useMemo(() => {
+    const failingIds = new Set(
+      fleetSummaryTable.filter(row => row.availability !== null && row.availability < 100).map(row => row.id)
+    );
+    return records.filter(r => failingIds.has(r.equipmentId) && r.status !== 'Operativo')
+                  .sort((a, b) => b.date.localeCompare(a.date));
+  }, [fleetSummaryTable, records]);
+
+  return (
+    <div ref={dashboardRef} style={{ paddingBottom: '20px' }}>
+      <div className="page-header">
+        <div className="page-title-group">
+          <h1>Dashboard de Disponibilidad de Equipos</h1>
+          <p>Métricas claves y visualización de KPIs del contrato de servicio ({formatToDDMMYYYY(startDate)} al {formatToDDMMYYYY(endDate)})</p>
+        </div>
+        <div id="export-actions-panel" className="actions-group">
+          <button className="btn btn-secondary" onClick={handleExportCSV}>
+            <Download size={16} />
+            <span>Descargar Excel</span>
+          </button>
+          <button className="btn btn-primary" onClick={handleExportPDF} disabled={exportingPDF}>
+            <FileDown size={16} />
+            <span>{exportingPDF ? 'Generando...' : 'Exportar PDF'}</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Date Filters Bar */}
+      <div className="glass filter-bar">
+        <div className="filter-group">
+          <span className="filter-label">Fecha Inicio</span>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            max={endDate}
+          />
+        </div>
+        <div className="filter-group">
+          <span className="filter-label">Fecha Fin</span>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            min={startDate}
+            max={todayStr}
+          />
+        </div>
+        
+        <div className="filter-group" style={{ marginLeft: '16px' }}>
+          <span className="filter-label" style={{ marginBottom: '6px' }}>Filtros Rápidos</span>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(7)}>7d</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(15)}>15d</button>
+            <button className="btn btn-secondary btn-sm" onClick={setMonthPreset}>Este Mes</button>
+            <button 
+              className="btn btn-secondary btn-sm" 
+              onClick={setContractPeriodPreset}
+              style={{ borderColor: 'var(--primary-light)', color: 'var(--primary)' }}
+              title="Período del 21 del mes pasado al 20 del presente mes"
+            >
+              Período Contrato (21-20)
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Equipment Type Filter Checkboxes Bar */}
+      <div id="type-checkboxes-panel" className="glass filter-bar" style={{ marginTop: '-12px', marginBottom: '24px' }}>
+        <div className="filter-group" style={{ width: '100%' }}>
+          <span className="filter-label" style={{ marginBottom: '8px' }}>Equipos a Evaluar en KPI</span>
+          <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
+            {(['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'] as Equipment['type'][]).map(t => (
+              <label 
+                key={t} 
+                style={{ 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: '8px', 
+                  fontSize: '0.9rem', 
+                  cursor: 'pointer', 
+                  fontWeight: '600',
+                  userSelect: 'none'
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedTypes.includes(t)}
+                  onChange={() => toggleTypeSelection(t)}
+                  style={{ 
+                    cursor: 'pointer', 
+                    width: '18px', 
+                    height: '18px',
+                    accentColor: 'var(--primary-light)'
+                  }}
+                />
+                <span>{getPluralType(t)}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* KPI Cards Grid */}
+      <div className="kpi-grid">
+        <div className="glass kpi-card" style={{ '--card-accent': 'var(--primary)' } as any}>
+          <span className="kpi-title">Disponibilidad de Flota</span>
+          <div className="kpi-value" style={{ color: 'var(--primary-light)' }}>
+            {metrics.overallContractual.toFixed(1)}%
+          </div>
+          <span className="kpi-subtext">Cumplimiento del contrato de servicio</span>
+        </div>
+
+        <div className="glass kpi-card" style={{ '--card-accent': 'var(--secondary)' } as any}>
+          <span className="kpi-title">Horas Comprometidas</span>
+          <div className="kpi-value" style={{ color: 'var(--secondary)' }}>
+            {totalContractTargetHours.toLocaleString()} hrs
+          </div>
+          <span className="kpi-subtext">Horas programadas por contrato</span>
+        </div>
+
+        <div className="glass kpi-card" style={{ '--card-accent': 'var(--color-operativo)' } as any}>
+          <span className="kpi-title">Horas Operativas Entregadas</span>
+          <div className="kpi-value" style={{ color: 'var(--color-operativo)' }}>
+            {totalContractDeliveredHours.toLocaleString()} hrs
+          </div>
+          <span className="kpi-subtext">Horas útiles (topadas al límite diario)</span>
+        </div>
+
+        <div className="glass kpi-card" style={{ '--card-accent': 'var(--color-mantencioncorrectiva)' } as any}>
+          <span className="kpi-title">Horas Fuera de Servicio</span>
+          <div className="kpi-value" style={{ color: 'var(--color-mantencioncorrectiva)' }}>
+            {totalHoursDown.toLocaleString()} hrs
+          </div>
+          <span className="kpi-subtext">Detenciones antes de la hora de tronadura</span>
+        </div>
+      </div>
+
+      {/* Cards of Availability by Type */}
+      <div style={{ marginTop: '24px', marginBottom: '24px' }}>
+        <h2 className="chart-title" style={{ marginBottom: '16px', fontSize: '1.2rem', fontWeight: '700' }}>
+          Disponibilidad por Categoría de Flota
+        </h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '20px' }}>
+          {(['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'] as Equipment['type'][]).map(t => {
+            const isSelected = selectedTypes.includes(t);
+            const data = metrics.byType[t];
+            if (!data) return null;
+            
+            let accentColor = 'var(--primary)';
+            if (t === 'Cargador Frontal') accentColor = 'var(--secondary)';
+            if (t === 'Polvorín Móvil') accentColor = 'var(--color-mantencionpreventiva)';
+            if (t === 'Camioneta') accentColor = '#8b5cf6';
+
+            const delivered = (data.contractualAvailability / 100) * data.hoursTarget;
+            const target = data.hoursTarget;
+
+            return (
+              <div 
+                key={t} 
+                className="glass kpi-card" 
+                style={{ 
+                  '--card-accent': accentColor,
+                  display: 'flex', 
+                  flexDirection: 'column',
+                  gap: '10px',
+                  padding: '20px',
+                  position: 'relative',
+                  overflow: 'hidden',
+                  opacity: isSelected ? 1 : 0.4,
+                  transition: 'opacity var(--transition-fast)'
+                } as any}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '0.8rem', fontWeight: '700', textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                    {getPluralType(t)}
+                  </span>
+                  {!isSelected && (
+                    <span style={{ fontSize: '0.65rem', padding: '2px 6px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', color: 'var(--text-muted)' }}>
+                      Excluido de KPI
+                    </span>
+                  )}
+                </div>
+                
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '4px' }}>
+                  <div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>Disponibilidad:</span>
+                    <div style={{ fontSize: '1.6rem', fontWeight: '800', color: accentColor }}>
+                      {data.contractualAvailability.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div style={{ textAlign: 'right', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    <div><strong>{delivered.toFixed(0)}</strong> / {target} hrs</div>
+                  </div>
+                </div>
+
+                {/* Progress bar */}
+                <div style={{ marginTop: '4px' }}>
+                  <div style={{ width: '100%', height: '6px', background: 'rgba(0,0,0,0.05)', borderRadius: '3px', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, data.contractualAvailability)}%`, height: '100%', background: accentColor, borderRadius: '3px' }} />
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Charts Grid */}
+      <div className="charts-grid">
+        {/* Trend Area Chart */}
+        <div className="glass chart-card">
+          <h2 className="chart-title">Evolución de Disponibilidad Diaria</h2>
+          <div className="chart-container">
+            <ResponsiveContainer width="100%" height="100%">
+              <AreaChart data={historyChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="colorContract" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--primary)" stopOpacity={0.4}/>
+                    <stop offset="95%" stopColor="var(--primary)" stopOpacity={0}/>
+                  </linearGradient>
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
+                <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} />
+                <YAxis domain={[50, 100]} stroke="var(--text-muted)" fontSize={11} />
+                <Tooltip 
+                  contentStyle={{ 
+                    backgroundColor: 'var(--bg-main)', 
+                    borderColor: 'var(--border-color)', 
+                    color: 'var(--text-primary)', 
+                    borderRadius: '8px' 
+                  }}
+                />
+                <Legend verticalAlign="top" height={36} />
+                <Area 
+                  type="monotone" 
+                  dataKey="Disponibilidad (%)" 
+                  stroke="var(--primary-light)" 
+                  fillOpacity={1} 
+                  fill="url(#colorContract)" 
+                  strokeWidth={2}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Bar Chart: Availability by Type */}
+        <div className="glass chart-card">
+          <h2 className="chart-title">Comparación por Tipo de Equipo</h2>
+          <div className="chart-container">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={barChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
+                <XAxis dataKey="name" stroke="var(--text-muted)" fontSize={11} />
+                <YAxis domain={[0, 100]} stroke="var(--text-muted)" fontSize={11} />
+                <Tooltip
+                  contentStyle={{ 
+                    backgroundColor: 'var(--bg-main)', 
+                    borderColor: 'var(--border-color)', 
+                    color: 'var(--text-primary)', 
+                    borderRadius: '8px' 
+                  }}
+                />
+                <Legend verticalAlign="top" height={36} />
+                <Bar dataKey="Disponibilidad (%)" fill="var(--primary-light)" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+
+        {/* Breakdown of down hours (Pie Chart) */}
+        <div className="glass chart-card">
+          <h2 className="chart-title">Distribución de Horas Fuera de Servicio</h2>
+          <div className="chart-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            {metrics.faultBreakdown[0]?.name === 'Sin fallas' ? (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', textAlign: 'center' }}>
+                <Clock size={40} style={{ margin: '0 auto 12px', opacity: 0.5 }} />
+                Sin horas fuera de servicio registradas en este período.
+              </div>
+            ) : (
+              <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+                <ResponsiveContainer width="100%" height={240}>
+                  <PieChart>
+                    <Pie
+                      data={metrics.faultBreakdown}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={80}
+                      paddingAngle={5}
+                      dataKey="value"
+                    >
+                      {metrics.faultBreakdown.map((_, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      formatter={(value: any) => [`${value} hrs`, 'Tiempo de inactividad']}
+                      contentStyle={{ 
+                        backgroundColor: 'var(--bg-main)', 
+                        borderColor: 'var(--border-color)', 
+                        color: 'var(--text-primary)', 
+                        borderRadius: '8px' 
+                      }}
+                    />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: 'flex', gap: '16px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {metrics.faultBreakdown.map((entry, index) => (
+                    <div key={entry.name} style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem' }}>
+                      <span style={{ width: '12px', height: '12px', borderRadius: '50%', backgroundColor: COLORS[index % COLORS.length] }}></span>
+                      <span>{entry.name}: <strong>{entry.value} hrs</strong></span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Brief Contract Summary Alert */}
+        <div className="glass chart-card" style={{ height: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center' }}>
+          <h2 className="chart-title" style={{ margin: 0 }}>Análisis de Cumplimiento Contractual</h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.9rem' }}>
+            <div style={{ background: 'rgba(0,0,0,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+              <strong>Metas Diarias:</strong> Cada tipo de equipo exige un número de unidades operativas en turno de 12 horas. Disponibilidad de flota actual: <strong>{metrics.overallContractual.toFixed(1)}%</strong>.
+            </div>
+            
+            <div style={{ display: 'flex', gap: '12px', padding: '12px', borderRadius: '10px', background: metrics.overallContractual >= 95 ? 'var(--color-operativo-bg)' : 'var(--color-mantencioncorrectiva-bg)' }}>
+              <div style={{ color: metrics.overallContractual >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)', fontWeight: 'bold', fontSize: '1.1rem' }}>
+                {metrics.overallContractual >= 95 ? '✓ EXCELENTE' : '⚠ ALERTA'}
+              </div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                {metrics.overallContractual >= 95 
+                  ? 'La disponibilidad general cumple con los niveles requeridos para la operación de Planta Sierra Gorda.'
+                  : 'La disponibilidad se encuentra por debajo de la meta estipulada (95%). Revise las mantenciones y reparaciones.'}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Summary Table Card */}
+      <div className="glass table-card" style={{ marginBottom: '24px' }}>
+        <h2 className="chart-title">Desempeño Individual de Equipos</h2>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Nombre</th>
+                <th>Tipo</th>
+                <th>Patente</th>
+                <th style={{ textAlign: 'center' }}>Horas Disponibles Entregadas</th>
+                <th style={{ textAlign: 'center' }}>Horas Fuera Serv.</th>
+                <th style={{ textAlign: 'center' }}>Disponibilidad Individual</th>
+                <th>Último Estado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {fleetSummaryTable.map(row => (
+                <tr key={row.id}>
+                  <td style={{ fontWeight: '600' }}>{row.name}</td>
+                  <td>{row.type}</td>
+                  <td><code>{row.patent || '-'}</code></td>
+                  <td style={{ textAlign: 'center' }}>{row.availHours} hrs</td>
+                  <td style={{ textAlign: 'center' }}>{row.downHours} hrs</td>
+                  <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                    {row.availability === null ? (
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>N/A</span>
+                    ) : row.availability < 100 ? (
+                      <span 
+                        onClick={() => setModalEqId(row.id)}
+                        style={{ 
+                          cursor: 'pointer', 
+                          textDecoration: 'underline', 
+                          color: row.availability >= 95 ? 'var(--color-operativo)' : row.availability >= 80 ? 'var(--color-mantencionprogramada)' : 'var(--color-mantencioncorrectiva)' 
+                        }}
+                        title="Ver detalle de inactividad"
+                      >
+                        {row.availability.toFixed(1)}%
+                      </span>
+                    ) : (
+                      <span style={{ color: 'var(--color-operativo)' }}>
+                        {row.availability.toFixed(1)}%
+                      </span>
+                    )}
+                  </td>
+                  <td>
+                    <span className={`badge badge-${getStatusClass(row.lastStatus)}`}>
+                      {row.lastStatus}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* New Section: Details for all equipments with availability < 100% */}
+      <div className="glass table-card">
+        <h2 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <AlertTriangle size={20} className="text-secondary" style={{ color: 'var(--color-mantencionprogramada)' }} />
+          Detalle de Equipos con Disponibilidad &lt; 100%
+        </h2>
+        <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '-6px' }}>
+          Listado histórico de todas las mantenciones y fallas del período para equipos con disponibilidad menor al 100%.
+        </p>
+        <div className="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Equipo</th>
+                <th>Tipo</th>
+                <th>Fecha</th>
+                <th>Estado Operativo</th>
+                <th style={{ textAlign: 'center' }}>Rango Horas</th>
+                <th style={{ textAlign: 'center' }}>Horas Detenido</th>
+                <th style={{ textAlign: 'center' }}>Post-Tronadura</th>
+                <th>Comentario / Detalle de Falla</th>
+              </tr>
+            </thead>
+            <tbody>
+              {failingEquipmentsRecords.map(r => {
+                const eq = fleet.find(e => e.id === r.equipmentId);
+                if (!eq) return null;
+                const totalDown = r.endHour - r.startHour;
+                
+                return (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: '600' }}>{eq.name}</td>
+                    <td>{eq.type}</td>
+                    <td><code>{formatToDDMMYYYY(r.date)}</code></td>
+                    <td>
+                      <span className={`badge badge-${getStatusClass(r.status)}`}>
+                        {r.status}
+                      </span>
+                    </td>
+                    <td style={{ textAlign: 'center' }}>
+                      <code>{r.startHour < 10 ? `0${r.startHour}:00` : `${r.startHour}:00`} - {r.endHour < 10 ? `0${r.endHour}:00` : `${r.endHour}:00`}</code>
+                    </td>
+                    <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
+                      {totalDown} hrs
+                    </td>
+                    <td style={{ textAlign: 'center', color: r.hoursPostBlasting > 0 ? 'var(--color-operativo)' : 'var(--text-muted)' }}>
+                      {r.hoursPostBlasting > 0 ? `-${r.hoursPostBlasting} hrs` : '0 hrs'}
+                    </td>
+                    <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios registrados.'}</td>
+                  </tr>
+                );
+              })}
+
+              {failingEquipmentsRecords.length === 0 && (
+                <tr>
+                  <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                    Todos los equipos seleccionados mantuvieron el 100% de disponibilidad en este período.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Modal Detailed Downtime View */}
+      {modalEqId && modalEq && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100%',
+          height: '100%',
+          backgroundColor: 'rgba(0, 0, 0, 0.4)',
+          backdropFilter: 'blur(4px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          animation: 'slideIn 0.15s ease-out'
+        }}>
+          <div className="glass table-card" style={{ width: '90%', maxWidth: '800px', padding: '30px', position: 'relative' }}>
+            <button 
+              onClick={() => setModalEqId(null)}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'none',
+                border: 'none',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer'
+              }}
+            >
+              <X size={20} />
+            </button>
+            <h2 className="chart-title" style={{ marginBottom: '8px' }}>
+              Detalle de Inactividad: {modalEq.name}
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '24px' }}>
+              Tipo: <strong>{modalEq.type}</strong> | Patente: <code>{modalEq.patent || '-'}</code>
+            </p>
+
+            <div className="table-wrapper" style={{ maxHeight: '350px', overflowY: 'auto' }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th>Estado</th>
+                    <th style={{ textAlign: 'center' }}>Rango Horas</th>
+                    <th style={{ textAlign: 'center' }}>Horas Fuera Serv.</th>
+                    <th style={{ textAlign: 'center' }}>Post-Tronadura</th>
+                    <th>Detalle de Falla / Comentario</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modalRecords.map(r => {
+                    const totalDown = r.endHour - r.startHour;
+                    return (
+                      <tr key={r.id}>
+                        <td><code>{formatToDDMMYYYY(r.date)}</code></td>
+                        <td>
+                          <span className={`badge badge-${getStatusClass(r.status)}`}>
+                            {r.status}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'center' }}>
+                          <code>{r.startHour < 10 ? `0${r.startHour}:00` : `${r.startHour}:00`} - {r.endHour < 10 ? `0${r.endHour}:00` : `${r.endHour}:00`}</code>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
+                          {totalDown} hrs
+                        </td>
+                        <td style={{ textAlign: 'center', color: r.hoursPostBlasting > 0 ? 'var(--color-operativo)' : 'var(--text-muted)' }}>
+                          {r.hoursPostBlasting > 0 ? `-${r.hoursPostBlasting} hrs` : '0 hrs'}
+                        </td>
+                        <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios.'}</td>
+                      </tr>
+                    );
+                  })}
+
+                  {modalRecords.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                        No hay fallas o mantenciones registradas en el período seleccionado.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '24px' }}>
+              <button className="btn btn-secondary" onClick={() => setModalEqId(null)}>
+                Cerrar Detalle
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};

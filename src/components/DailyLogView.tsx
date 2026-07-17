@@ -293,7 +293,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     setNitratoStock(prevRaw.nitratoStock);
     setMatrizStock(prevRaw.matrizStock);
 
-    addToast(`Datos de equipos, stock de insumos y hora de tronadura copiados de ayer. Recuerde guardar.`, 'success');
+    addToast(`Datos de equipos, stock de materias primas y hora de tronadura copiados de ayer. Recuerde guardar.`, 'success');
   };
 
   const handleBlastingTimeChange = (val: string) => {
@@ -338,7 +338,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       <div className="page-header" style={{ marginBottom: '16px' }}>
         <div className="page-title-group">
           <h1>Registro de Operaciones Diarias</h1>
-          <p>Seleccione la fecha de registro y cargue los parámetros diarios e insumos</p>
+          <p>Seleccione la fecha de registro y cargue los parámetros diarios y materias primas</p>
         </div>
         <div className="actions-group">
           {activeSubTab !== 'dotacion' && (
@@ -482,7 +482,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           }}
         >
           <Layers size={16} />
-          <span>2. Stock de Insumos (Materias Primas)</span>
+          <span>2. Stock de Materias Primas</span>
         </button>
 
         <button 
@@ -707,7 +707,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         <div className="glass table-card" style={{ maxWidth: '600px', margin: '0 auto' }}>
           <h2 className="chart-title">Inventario Diario de Materias Primas</h2>
           <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '20px', marginTop: '-8px' }}>
-            Ingrese el stock disponible para hoy de los insumos principales del contrato.
+            Ingrese el stock disponible para hoy de las materias primas principales del contrato.
           </p>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
@@ -749,7 +749,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           <div style={{ background: 'var(--primary-glow)', padding: '14px', borderRadius: '12px', color: 'var(--text-primary)', fontSize: '0.85rem', marginTop: '20px' }}>
             <AlertCircle size={20} style={{ float: 'left', marginRight: '8px', color: 'var(--primary)' }} />
             <span>
-              <strong>Cálculo de Disponibilidad de Insumos:</strong> Si el stock diario es igual o superior al mínimo (200 ton), el cumplimiento es del 100%. De lo contrario, se calcula proporcionalmente (ej. 170 ton = 85% de cumplimiento).
+              <strong>Cálculo de Disponibilidad de Materias Primas:</strong> Si el stock diario es igual o superior al mínimo (200 ton), el cumplimiento es del 100%. De lo contrario, se calcula proporcionalmente (ej. 170 ton = 85% de cumplimiento).
             </span>
           </div>
 

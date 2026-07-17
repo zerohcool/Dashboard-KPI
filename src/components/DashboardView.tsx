@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
-import { dbService } from '../services/db';
-import type { Equipment, PeriodCompliance } from '../services/db';
+import { dbService, getWednesdayStartDate, getRoleShiftType } from '../services/db';
+import type { Equipment, PeriodCompliance, AvailabilityRecord } from '../services/db';
 import { 
   calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours 
 } from '../utils/calculations';
@@ -9,7 +9,7 @@ import {
   BarChart, Bar, Cell, PieChart, Pie
 } from 'recharts';
 import { 
-  Download, FileDown, Clock, X, AlertTriangle, Award, Save 
+  Download, FileDown, Clock, X, AlertTriangle, Award, Save, Layers, Users 
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -50,8 +50,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const [exportingPDF, setExportingPDF] = useState(false);
   const [modalEqId, setModalEqId] = useState<string | null>(null);
   
-  // Dashboard Tabs: 'overview' | 'kpi'
-  const [activeTab, setActiveTab] = useState<'overview' | 'kpi'>('overview');
+  // Dashboard Tabs (Phase 18: overview, raw_materials, attendance, kpi)
+  const [activeTab, setActiveTab] = useState<'overview' | 'raw_materials' | 'attendance' | 'kpi'>('overview');
 
   // Selective equipment types state (Phase 17: Camioneta NOT selected by default!)
   const [selectedTypes, setSelectedTypes] = useState<Equipment['type'][]>(
@@ -416,6 +416,91 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                   .sort((a, b) => b.date.localeCompare(a.date));
   }, [fleetSummaryTable, records]);
 
+  // Re-organize records by date for raw materials & attendance stats
+  const recordsByDate = useMemo(() => {
+    const map: Record<string, AvailabilityRecord[]> = {};
+    records.forEach(r => {
+      if (!map[r.date]) map[r.date] = [];
+      map[r.date].push(r);
+    });
+    return map;
+  }, [records]);
+
+  // New Tab: Materias Primas metrics
+  const avgNitrato = useMemo(() => {
+    if (rawMaterials.length === 0) return 0;
+    const sum = rawMaterials.reduce((acc, r) => acc + r.nitratoStock, 0);
+    return parseFloat((sum / rawMaterials.length).toFixed(1));
+  }, [rawMaterials]);
+
+  const avgMatriz = useMemo(() => {
+    if (rawMaterials.length === 0) return 0;
+    const sum = rawMaterials.reduce((acc, r) => acc + r.matrizStock, 0);
+    return parseFloat((sum / rawMaterials.length).toFixed(1));
+  }, [rawMaterials]);
+
+  const rawMaterialsChartData = useMemo(() => {
+    return [...rawMaterials].sort((a, b) => a.date.localeCompare(b.date)).map(row => {
+      const parts = row.date.split('-');
+      const formattedDate = parts.length === 3 ? `${parts[2]}/${parts[1]}` : row.date;
+      return {
+        date: formattedDate,
+        'Nitrato': row.nitratoStock,
+        'Matriz': row.matrizStock
+      };
+    });
+  }, [rawMaterials]);
+
+  // New Tab: Dotación Roster metrics
+  const attendanceStats = useMemo(() => {
+    const datesList = Object.keys(recordsByDate).sort();
+    if (datesList.length === 0 || roles.length === 0) return [];
+    
+    const statsMap: Record<string, { roleName: string; shift: string; totalAttended: number; totalRequired: number; countDays: number }> = {};
+    roles.forEach(r => {
+      const shift = getRoleShiftType(r.roleName);
+      statsMap[r.roleName] = {
+        roleName: r.roleName,
+        shift,
+        totalAttended: 0,
+        totalRequired: 0,
+        countDays: 0
+      };
+    });
+
+    datesList.forEach(dateStr => {
+      const wedDate = getWednesdayStartDate(dateStr);
+      const att = weeklyAttendances.find(w => w.weekStartDate === wedDate);
+      
+      const d = new Date(dateStr + 'T12:00:00');
+      const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0
+
+      roles.forEach(r => {
+        const shift = getRoleShiftType(r.roleName);
+        const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+        const attended = (att && att.attendanceData[r.roleName])
+          ? att.attendanceData[r.roleName][dayIdx]
+          : requiredDaily;
+
+        statsMap[r.roleName].totalAttended += attended;
+        statsMap[r.roleName].totalRequired += requiredDaily;
+        statsMap[r.roleName].countDays += 1;
+      });
+    });
+
+    return Object.values(statsMap).map(s => {
+      const avgAtt = s.countDays > 0 ? (s.totalAttended / s.countDays) : 0;
+      const compliance = s.totalRequired > 0 ? (s.totalAttended / s.totalRequired) * 100 : 100;
+      return {
+        roleName: s.roleName,
+        shift: s.shift,
+        avgAttended: parseFloat(avgAtt.toFixed(1)),
+        requiredDaily: s.totalRequired / s.countDays,
+        compliance: Math.min(100, parseFloat(compliance.toFixed(1)))
+      };
+    });
+  }, [roles, weeklyAttendances, recordsByDate]);
+
   const scoreBadge = getContractScoreBadge(metrics.weightedScore);
 
   return (
@@ -472,14 +557,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         </div>
       </div>
 
-      {/* TABS SWITCHER */}
-      <div id="dashboard-tabs-headers" style={{ display: 'flex', gap: '4px', borderBottom: '2px solid var(--border-color)', marginBottom: '24px', marginTop: '12px' }}>
+      {/* TABS SWITCHER (Phase 18: order - overview, raw_materials, attendance, kpi) */}
+      <div id="dashboard-tabs-headers" style={{ display: 'flex', gap: '4px', borderBottom: '2px solid var(--border-color)', marginBottom: '24px', marginTop: '12px', flexWrap: 'wrap' }}>
         <button 
           onClick={() => setActiveTab('overview')}
           style={{ 
-            padding: '12px 24px', 
+            padding: '12px 20px', 
             fontWeight: '600', 
-            fontSize: '0.95rem', 
+            fontSize: '0.9rem', 
             background: 'none', 
             border: 'none', 
             borderBottom: activeTab === 'overview' ? '3px solid var(--primary)' : '3px solid transparent',
@@ -492,15 +577,57 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
           }}
         >
           <Clock size={16} />
-          <span>Disponibilidad y Flota</span>
+          <span>Disponibilidad de Flota</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('raw_materials')}
+          style={{ 
+            padding: '12px 20px', 
+            fontWeight: '600', 
+            fontSize: '0.9rem', 
+            background: 'none', 
+            border: 'none', 
+            borderBottom: activeTab === 'raw_materials' ? '3px solid var(--primary)' : '3px solid transparent',
+            color: activeTab === 'raw_materials' ? 'var(--primary)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <Layers size={16} />
+          <span>Materias Primas</span>
+        </button>
+
+        <button 
+          onClick={() => setActiveTab('attendance')}
+          style={{ 
+            padding: '12px 20px', 
+            fontWeight: '600', 
+            fontSize: '0.9rem', 
+            background: 'none', 
+            border: 'none', 
+            borderBottom: activeTab === 'attendance' ? '3px solid var(--primary)' : '3px solid transparent',
+            color: activeTab === 'attendance' ? 'var(--primary)' : 'var(--text-secondary)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            transition: 'all 0.15s ease'
+          }}
+        >
+          <Users size={16} />
+          <span>Dotación Roster</span>
         </button>
 
         <button 
           onClick={() => setActiveTab('kpi')}
           style={{ 
-            padding: '12px 24px', 
+            padding: '12px 20px', 
             fontWeight: '600', 
-            fontSize: '0.95rem', 
+            fontSize: '0.9rem', 
             background: 'none', 
             border: 'none', 
             borderBottom: activeTab === 'kpi' ? '3px solid var(--primary)' : '3px solid transparent',
@@ -918,7 +1045,241 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         </>
       )}
 
-      {/* TAB 2: KPI EVALUATION TAB CONTENT (With inline editors & Safety KPIs) */}
+      {/* TAB 2: MATERIAS PRIMAS TAB CONTENT (NEW PHASE 18) */}
+      {activeTab === 'raw_materials' && (
+        <>
+          <div className="kpi-grid">
+            <div className="glass kpi-card" style={{ '--card-accent': '#f59e0b' } as any}>
+              <span className="kpi-title">Stock Promedio Nitrato</span>
+              <div className="kpi-value" style={{ color: '#f59e0b' }}>
+                {avgNitrato.toLocaleString()} ton
+              </div>
+              <span className="kpi-subtext">Mínimo contractual: 200 ton diarios</span>
+            </div>
+
+            <div className="glass kpi-card" style={{ '--card-accent': '#0284c7' } as any}>
+              <span className="kpi-title">Stock Promedio Matriz</span>
+              <div className="kpi-value" style={{ color: '#0284c7' }}>
+                {avgMatriz.toLocaleString()} ton
+              </div>
+              <span className="kpi-subtext">Mínimo contractual: 200 ton diarios</span>
+            </div>
+
+            <div className="glass kpi-card" style={{ '--card-accent': 'var(--primary)' } as any}>
+              <span className="kpi-title">Cumplimiento Global de Stock</span>
+              <div className="kpi-value" style={{ color: 'var(--primary-light)' }}>
+                {metrics.rawMaterialsCompliance.toFixed(1)}%
+              </div>
+              <span className="kpi-subtext">Desempeño promedio del inventario diario</span>
+            </div>
+          </div>
+
+          {/* Area Chart: Stocks Evolution */}
+          <div className="glass chart-card" style={{ marginTop: '24px', marginBottom: '24px' }}>
+            <h2 className="chart-title">Evolución Diaria de Stock de Materias Primas</h2>
+            <div className="chart-container">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={rawMaterialsChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="colorNitrato" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#f59e0b" stopOpacity={0}/>
+                    </linearGradient>
+                    <linearGradient id="colorMatriz" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#0284c7" stopOpacity={0.4}/>
+                      <stop offset="95%" stopColor="#0284c7" stopOpacity={0}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
+                  <XAxis dataKey="date" stroke="var(--text-muted)" fontSize={11} />
+                  <YAxis stroke="var(--text-muted)" fontSize={11} />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'var(--bg-main)', 
+                      borderColor: 'var(--border-color)', 
+                      color: 'var(--text-primary)', 
+                      borderRadius: '8px' 
+                    }}
+                  />
+                  <Legend verticalAlign="top" height={36} />
+                  <Area 
+                    type="monotone" 
+                    dataKey="Nitrato" 
+                    stroke="#f59e0b" 
+                    fillOpacity={1} 
+                    fill="url(#colorNitrato)" 
+                    strokeWidth={2}
+                  />
+                  <Area 
+                    type="monotone" 
+                    dataKey="Matriz" 
+                    stroke="#0284c7" 
+                    fillOpacity={1} 
+                    fill="url(#colorMatriz)" 
+                    strokeWidth={2}
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Daily Raw Materials stock Table */}
+          <div className="glass table-card">
+            <h2 className="chart-title">Historial Diario de Stock (Materias Primas)</h2>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th style={{ textAlign: 'center' }}>Nitrato Stock</th>
+                    <th style={{ textAlign: 'center' }}>Matriz Stock</th>
+                    <th style={{ textAlign: 'center' }}>Cumplimiento Nitrato</th>
+                    <th style={{ textAlign: 'center' }}>Cumplimiento Matriz</th>
+                    <th>Estado de Insumos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...rawMaterials].sort((a, b) => b.date.localeCompare(a.date)).map(row => {
+                    const nitratoPct = Math.min(100, (row.nitratoStock / 200) * 100);
+                    const matrizPct = Math.min(100, (row.matrizStock / 200) * 100);
+                    const isAllOk = row.nitratoStock >= 200 && row.matrizStock >= 200;
+
+                    return (
+                      <tr key={row.date}>
+                        <td><code>{formatToDDMMYYYY(row.date)}</code></td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.nitratoStock} ton</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.matrizStock} ton</td>
+                        <td style={{ textAlign: 'center', color: nitratoPct >= 100 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)' }}>
+                          {nitratoPct.toFixed(1)}%
+                        </td>
+                        <td style={{ textAlign: 'center', color: matrizPct >= 100 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)' }}>
+                          {matrizPct.toFixed(1)}%
+                        </td>
+                        <td>
+                          <span className={`badge badge-${isAllOk ? 'operativo' : 'mantencioncorrectiva'}`}>
+                            {isAllOk ? '✓ Stock Completo' : '⚠ Bajo Mínimo'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {rawMaterials.length === 0 && (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: 'center', padding: '24px', color: 'var(--text-muted)' }}>
+                        No hay registros de materias primas para este período.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* TAB 3: ATTENDANCE TAB CONTENT (NEW PHASE 18) */}
+      {activeTab === 'attendance' && (
+        <>
+          <div className="kpi-grid">
+            <div className="glass kpi-card" style={{ '--card-accent': 'var(--color-mantencionpreventiva)' } as any}>
+              <span className="kpi-title">Asistencia Global del Personal</span>
+              <div className="kpi-value" style={{ color: 'var(--color-mantencionpreventiva)' }}>
+                {metrics.attendanceCompliance.toFixed(1)}%
+              </div>
+              <span className="kpi-subtext">Cumplimiento del roster semanal</span>
+            </div>
+
+            <div className="glass kpi-card" style={{ '--card-accent': 'var(--secondary)' } as any}>
+              <span className="kpi-title">Cargos Evaluados</span>
+              <div className="kpi-value" style={{ color: 'var(--secondary)' }}>
+                {roles.length} Roles
+              </div>
+              <span className="kpi-subtext">Puestos estipulados en contrato</span>
+            </div>
+          </div>
+
+          {/* Bar Chart: Attendance Compliance by Role */}
+          <div className="glass chart-card" style={{ marginTop: '24px', marginBottom: '24px' }}>
+            <h2 className="chart-title">Porcentaje de Asistencia Promedio por Cargo</h2>
+            <div className="chart-container" style={{ height: '380px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={attendanceStats} margin={{ top: 10, right: 10, left: -20, bottom: 60 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
+                  <XAxis 
+                    dataKey="roleName" 
+                    stroke="var(--text-muted)" 
+                    fontSize={10} 
+                    angle={-30} 
+                    textAnchor="end" 
+                    interval={0} 
+                  />
+                  <YAxis domain={[0, 100]} stroke="var(--text-muted)" fontSize={11} />
+                  <Tooltip
+                    formatter={(value: any) => [`${value}%`, 'Cumplimiento']}
+                    contentStyle={{ 
+                      backgroundColor: 'var(--bg-main)', 
+                      borderColor: 'var(--border-color)', 
+                      color: 'var(--text-primary)', 
+                      borderRadius: '8px' 
+                    }}
+                  />
+                  <Bar dataKey="compliance" fill="var(--color-mantencionpreventiva)" radius={[4, 4, 0, 0]}>
+                    {attendanceStats.map((entry, idx) => (
+                      <Cell key={`cell-${idx}`} fill={entry.compliance >= 95 ? '#10b981' : entry.compliance >= 90 ? '#f59e0b' : '#ef4444'} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Detailed Attendance Roster Table */}
+          <div className="glass table-card">
+            <h2 className="chart-title">Desempeño y Asistencia por Cargo (Detalle de Turnos)</h2>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cargo / Puesto</th>
+                    <th style={{ textAlign: 'center' }}>Jornada</th>
+                    <th style={{ textAlign: 'center' }}>Dotación Contratada</th>
+                    <th style={{ textAlign: 'center' }}>Requerido Diario (Roster)</th>
+                    <th style={{ textAlign: 'center' }}>Asistencia Promedio</th>
+                    <th style={{ textAlign: 'center' }}>% Cumplimiento</th>
+                    <th>Estado de Alerta</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {attendanceStats.map(row => {
+                    const alertType = row.compliance >= 95 ? 'operativo' : row.compliance >= 90 ? 'mantencionprogramada' : 'mantencioncorrectiva';
+                    const alertLabel = row.compliance >= 95 ? '✓ Dotación Completa' : row.compliance >= 90 ? '⚠ Faltas Menores' : '🛑 Déficit Crítico';
+
+                    return (
+                      <tr key={row.roleName}>
+                        <td style={{ fontWeight: '600' }}>{row.roleName}</td>
+                        <td style={{ textAlign: 'center' }}><code>{row.shift}</code></td>
+                        <td style={{ textAlign: 'center' }}>{row.requiredDaily * (row.shift === '7x7' ? 2 : 1)} pers</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.requiredDaily} pers</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.avgAttended} pers</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.compliance >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)' }}>
+                          {row.compliance}%
+                        </td>
+                        <td>
+                          <span className={`badge badge-${alertType}`}>
+                            {alertLabel}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* TAB 4: KPI EVALUATION TAB CONTENT (Reordered Tables) */}
       {activeTab === 'kpi' && (
         <div>
           {/* Main Contract Score Header Grid */}
@@ -956,10 +1317,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                {/* Flota e Insumos */}
+                {/* Flota y Materias Primas */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                    <span>Disponibilidad de Flota e Insumos (Ponderación 31%)</span>
+                    <span>Disponibilidad de Flota y Materias Primas (Ponderación 31%)</span>
                     <strong>{metrics.overallContractual.toFixed(1)}%</strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -1027,10 +1388,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             </div>
           </div>
 
-          {/* TABLE 1: DISPONIBILIDAD E INSUMOS */}
+          {/* TABLE 1: DISPONIBILIDAD Y MATERIAS PRIMAS */}
           <div className="glass table-card" style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--primary)', marginBottom: '12px' }}>
-              1. Evaluación de Disponibilidad de Flota e Insumos
+              1. Evaluación de Disponibilidad de Flota y Materias Primas
             </h3>
             <div className="table-wrapper">
               <table>
@@ -1151,10 +1512,54 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             </div>
           </div>
 
-          {/* TABLE 3: SEGURIDAD (Valor Real editable inline!) */}
+          {/* TABLE 3: ROSTER / ASSIST (Moved to 3rd position - Dotación Semanal) */}
+          <div className="glass table-card" style={{ marginBottom: '24px' }}>
+            <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--color-mantencionpreventiva)', marginBottom: '12px' }}>
+              3. Evaluación de Dotación Semanal
+            </h3>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Item Evaluado</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Ponderación</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Medición</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
+                    <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
+                    <th style={{ width: '120px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {kpis.filter(k => k.category === 'dotacion').map(k => {
+                    const realVal = metrics.attendanceCompliance;
+                    const weightedVal = (k.weight * realVal) / 100;
+
+                    return (
+                      <tr key={k.id}>
+                        <td style={{ fontWeight: '600' }}>{k.name}</td>
+                        <td style={{ textAlign: 'center' }}>{k.weight}%</td>
+                        <td style={{ textAlign: 'center' }}>{k.unit}</td>
+                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.minVal}</td>
+                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
+                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{realVal.toFixed(1)}%</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
+                          {weightedVal.toFixed(2)}%
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* TABLE 4: SEGURIDAD (Moved to 4th position - Seguridad) */}
           <div className="glass table-card" style={{ marginBottom: '24px' }}>
             <h3 style={{ fontSize: '1rem', fontWeight: '700', color: '#10b981', marginBottom: '12px' }}>
-              3. Evaluación de Seguridad
+              4. Evaluación de Seguridad
             </h3>
             <div className="table-wrapper">
               <table>
@@ -1254,50 +1659,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               </table>
             </div>
           </div>
-
-          {/* TABLE 4: ROSTER / ASSIST */}
-          <div className="glass table-card">
-            <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--color-mantencionpreventiva)', marginBottom: '12px' }}>
-              4. Evaluación de Dotación Semanal
-            </h3>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Item Evaluado</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Ponderación</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Medición</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
-                    <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
-                    <th style={{ width: '120px', textAlign: 'center' }}>Valor Real</th>
-                    <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {kpis.filter(k => k.category === 'dotacion').map(k => {
-                    const realVal = metrics.attendanceCompliance;
-                    const weightedVal = (k.weight * realVal) / 100;
-
-                    return (
-                      <tr key={k.id}>
-                        <td style={{ fontWeight: '600' }}>{k.name}</td>
-                        <td style={{ textAlign: 'center' }}>{k.weight}%</td>
-                        <td style={{ textAlign: 'center' }}>{k.unit}</td>
-                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.minVal}</td>
-                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
-                        <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{realVal.toFixed(1)}%</td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
-                          {weightedVal.toFixed(2)}%
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       )}
 
@@ -1332,10 +1693,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             >
               <X size={20} />
             </button>
-            <h2 className="chart-title" style={{ marginBottom: '8px' }}>
+            <h2 className="chart-title" style={{ margin: '0 0 8px 0' }}>
               Detalle de Inactividad: {modalEq.name}
             </h2>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '24px' }}>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '24px', marginTop: 0 }}>
               Tipo: <strong>{modalEq.type}</strong> | Patente: <code>{modalEq.patent || '-'}</code>
             </p>
 

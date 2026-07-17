@@ -97,7 +97,7 @@ const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
   { id: 'kpi-camiones', category: 'disponibilidad', name: 'Disponibilidad de Camiones Fabrica', weight: 10, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-cargadores', category: 'disponibilidad', name: 'Disponibilidad de Cargador frontales (Tapapozos)', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-polvorines', category: 'disponibilidad', name: 'Disponibilidad de Polvorines Móviles', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
-  { id: 'kpi-insumos', category: 'disponibilidad', name: 'Disponibilidad de Insumos', weight: 5, unit: 'ton', periodicity: 'diario', minVal: '170', expectedVal: '200', maxVal: '200' },
+  { id: 'kpi-insumos', category: 'disponibilidad', name: 'Disponibilidad de Materias Primas', weight: 5, unit: 'ton', periodicity: 'diario', minVal: '170', expectedVal: '200', maxVal: '200' },
   // Calidad de Servicio (49%)
   { id: 'kpi-innovacion', category: 'calidad', name: 'Eficiencia: Índice de innovación y pruebas', weight: 5, unit: 'informe', periodicity: 'mensual', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-costos', category: 'calidad', name: 'Eficiencia: Control de costos USD/ton-tron', weight: 10, unit: 'informe', periodicity: 'semanal', minVal: '85%', expectedVal: '90%', maxVal: '95%' },

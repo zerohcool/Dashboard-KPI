@@ -100,7 +100,8 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
   const kpisByCategory = {
     disponibilidad: kpis.filter(k => k.category === 'disponibilidad'),
     calidad: kpis.filter(k => k.category === 'calidad'),
-    dotacion: kpis.filter(k => k.category === 'dotacion')
+    dotacion: kpis.filter(k => k.category === 'dotacion'),
+    seguridad: kpis.filter(k => k.category === 'seguridad')
   };
 
   const totalWeightSum = kpis.reduce((acc, k) => acc + k.weight, 0);
@@ -295,7 +296,7 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
 
           {/* Table: Disponibilidad */}
           <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '10px', color: 'var(--primary)' }}>
-            1. Tabla de Disponibilidad de Equipos e Insumos
+            1. Tabla de Disponibilidad de Equipos y Materias Primas
           </h3>
           <div className="table-wrapper" style={{ marginBottom: '24px' }}>
             <table>
@@ -382,8 +383,52 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
           </div>
 
           {/* Table: Dotación */}
-          <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '10px', color: 'var(--primary)' }}>
+          <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '10px', color: 'var(--primary)', marginTop: '24px' }}>
             3. Tabla de Dotación
+          </h3>
+          <div className="table-wrapper" style={{ marginBottom: '24px' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Nombre KPI</th>
+                  <th style={{ width: '100px', textAlign: 'center' }}>Ponderación</th>
+                  <th style={{ width: '100px', textAlign: 'center' }}>Medición</th>
+                  <th style={{ width: '100px', textAlign: 'center' }}>Periodicidad</th>
+                  <th style={{ width: '120px', textAlign: 'center' }}>Mínimo</th>
+                  <th style={{ width: '120px', textAlign: 'center' }}>Esperado</th>
+                  <th style={{ width: '120px', textAlign: 'center' }}>Máximo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {kpisByCategory.dotacion.map(k => (
+                  <tr key={k.id}>
+                    <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{k.name}</td>
+                    <td style={{ textAlign: 'center' }}>
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+                        <input
+                          type="number"
+                          min="0"
+                          value={k.weight}
+                          onChange={(e) => handleKPIChange(k.id, 'weight', parseFloat(e.target.value) || 0)}
+                          style={{ width: '60px', textAlign: 'center', padding: '4px' }}
+                        />
+                        <span style={{ fontSize: '0.8rem' }}>%</span>
+                      </div>
+                    </td>
+                    <td style={{ textAlign: 'center' }}><input type="text" value={k.unit} onChange={(e) => handleKPIChange(k.id, 'unit', e.target.value)} style={{ width: '70px', textAlign: 'center', padding: '4px' }} /></td>
+                    <td style={{ textAlign: 'center' }}><input type="text" value={k.periodicity} onChange={(e) => handleKPIChange(k.id, 'periodicity', e.target.value)} style={{ width: '80px', textAlign: 'center', padding: '4px' }} /></td>
+                    <td style={{ textAlign: 'center' }}><input type="text" value={k.minVal} onChange={(e) => handleKPIChange(k.id, 'minVal', e.target.value)} style={{ width: '90px', textAlign: 'center', padding: '4px' }} /></td>
+                    <td style={{ textAlign: 'center' }}><input type="text" value={k.expectedVal} onChange={(e) => handleKPIChange(k.id, 'expectedVal', e.target.value)} style={{ width: '90px', textAlign: 'center', padding: '4px' }} /></td>
+                    <td style={{ textAlign: 'center' }}><input type="text" value={k.maxVal} onChange={(e) => handleKPIChange(k.id, 'maxVal', e.target.value)} style={{ width: '90px', textAlign: 'center', padding: '4px' }} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Table: Seguridad */}
+          <h3 style={{ fontSize: '1rem', fontWeight: '700', marginBottom: '10px', color: 'var(--primary)', marginTop: '24px' }}>
+            4. Tabla de Seguridad
           </h3>
           <div className="table-wrapper">
             <table>
@@ -399,7 +444,7 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
                 </tr>
               </thead>
               <tbody>
-                {kpisByCategory.dotacion.map(k => (
+                {kpisByCategory.seguridad.map(k => (
                   <tr key={k.id}>
                     <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{k.name}</td>
                     <td style={{ textAlign: 'center' }}>

@@ -1,4 +1,9 @@
-import type { Equipment, AvailabilityRecord, ContractSettings } from '../services/db';
+import type { 
+  Equipment, AvailabilityRecord, ContractSettings, 
+  DailyRawMaterials, ContractKPI, DailyQualityCompliance, 
+  ContractRole, WeeklyAttendance 
+} from '../services/db';
+import { getWednesdayStartDate } from '../services/db';
 
 export const getPluralType = (type: string): string => {
   switch (type) {
@@ -81,7 +86,6 @@ export const calculateTypeDailyHours = (
   const deficitUnits = Math.max(0, requiredCount - N);
   const deficitHours = deficitUnits * 12;
 
-  // If there are no failures, deliver contract target minus any shortage deficit
   if (downIntervals.length === 0) {
     return {
       contractDelivered: Math.max(0, contractTarget - deficitHours),
@@ -91,7 +95,6 @@ export const calculateTypeDailyHours = (
     };
   }
 
-  // Decompose into unique time boundaries inside shift (7 to 19)
   const timePointsSet = new Set<number>();
   timePointsSet.add(7.0);
   timePointsSet.add(19.0);
@@ -113,7 +116,6 @@ export const calculateTypeDailyHours = (
     const width = tEnd - tStart;
     const mid = (tStart + tEnd) / 2;
 
-    // Count how many units are down in this sub-interval
     let activeDownCount = 0;
     downIntervals.forEach(inv => {
       if (mid >= inv.start && mid <= inv.end) {
@@ -143,7 +145,14 @@ export const calculateMetrics = (
   records: AvailabilityRecord[],
   settings: ContractSettings,
   daysCount: number,
-  selectedTypes: Equipment['type'][] = ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta']
+  selectedTypes: Equipment['type'][] = ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'],
+  startDate?: string,
+  endDate?: string,
+  rawMaterials: DailyRawMaterials[] = [],
+  qualityCompliances: DailyQualityCompliance[] = [],
+  weeklyAttendances: WeeklyAttendance[] = [],
+  kpis: ContractKPI[] = [],
+  roles: ContractRole[] = []
 ): {
   overallPhysical: number;
   overallContractual: number;
@@ -151,6 +160,11 @@ export const calculateMetrics = (
   dailyHistory: DailyAvailability[];
   faultBreakdown: { name: string; value: number }[];
   totalBackupCoveredHours: number;
+  // NEW OUTPUTS
+  rawMaterialsCompliance: number;
+  qualityCompliancesMap: Record<string, number>;
+  attendanceCompliance: number;
+  weightedScore: number;
 } => {
   const types = selectedTypes;
   
@@ -221,14 +235,12 @@ export const calculateMetrics = (
 
       dayPhysicalDelivered += typeDayAvailableHours;
 
-      // Contract calculations using backup overlap logic:
       const dayHours = calculateTypeDailyHours(required, typeRecords);
       
       dayContractTarget += dayHours.contractTarget;
       dayContractDelivered += dayHours.contractDelivered;
       totalBackupCoveredHours += dayHours.backupCovered;
 
-      // Accumulate into totals by type
       byType[t].hoursAvailable += typeDayAvailableHours;
     });
 
@@ -244,18 +256,15 @@ export const calculateMetrics = (
     });
   });
 
-  // Calculate final percentages by type
   types.forEach(t => {
     const typeEqList = fleet.filter(eq => eq.type === t);
     const required = getRequiredCount(t);
     
-    // Physical availability over the period
     const totalPhysicalTarget = typeEqList.length * 12 * Math.max(1, dates.length);
     byType[t].physicalAvailability = totalPhysicalTarget > 0 
       ? (byType[t].hoursAvailable / totalPhysicalTarget) * 100 
       : 100;
 
-    // Contractual availability over the period (summing the capped daily hours using overlap logic)
     let totalCappedContractHours = 0;
     dates.forEach(date => {
       const dayRecords = recordsByDate[date] || [];
@@ -274,7 +283,6 @@ export const calculateMetrics = (
       : 100;
   });
 
-  // Fault breakdown (status other than 'Operativo')
   const faultCounts: Record<string, number> = {
     'Mantención Programada': 0,
     'Mantención Preventiva': 0,
@@ -301,13 +309,114 @@ export const calculateMetrics = (
     faultBreakdown.push({ name: 'Sin fallas', value: 0 });
   }
 
+  // ==========================================
+  // NEW CUMULATIVE KPI CALCULATIONS (PHASE 16)
+  // ==========================================
+  
+  // 1. Raw Materials (Insumos) compliance
+  let rawMaterialsCompliance = 100.0;
+  if (startDate && endDate && dates.length > 0) {
+    let dayCompSum = 0;
+    dates.forEach(dateStr => {
+      const row = rawMaterials.find(rm => rm.date === dateStr);
+      const nitrato = row ? row.nitratoStock : 200;
+      const matriz = row ? row.matrizStock : 200;
+      const nitratoComp = Math.min(100, (nitrato / 200) * 100);
+      const matrizComp = Math.min(100, (matriz / 200) * 100);
+      dayCompSum += (nitratoComp + matrizComp) / 2;
+    });
+    rawMaterialsCompliance = dayCompSum / dates.length;
+  }
+
+  // 2. Service Quality compliance map
+  const qualityCompliancesMap: Record<string, number> = {};
+  const qualityKpis = kpis.filter(k => k.category === 'calidad');
+  
+  qualityKpis.forEach(k => {
+    const recordsForKpi = qualityCompliances.filter(q => q.kpiId === k.id);
+    if (recordsForKpi.length > 0) {
+      const sum = recordsForKpi.reduce((acc, curr) => acc + curr.compliancePct, 0);
+      qualityCompliancesMap[k.id] = sum / recordsForKpi.length;
+    } else {
+      qualityCompliancesMap[k.id] = 100.0; // default to 100% compliance
+    }
+  });
+
+  // 3. Attendance (Dotación) compliance
+  let attendanceCompliance = 100.0;
+  if (startDate && endDate && dates.length > 0 && roles.length > 0) {
+    let totalAttendedSum = 0;
+    let totalRequiredSum = 0;
+    
+    dates.forEach(dateStr => {
+      const wedDate = getWednesdayStartDate(dateStr);
+      const att = weeklyAttendances.find(w => w.weekStartDate === wedDate);
+      
+      const d = new Date(dateStr + 'T12:00:00');
+      const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0, Tuesday is 6
+
+      roles.forEach(r => {
+        const required = r.requiredCount;
+        const attended = (att && att.attendanceData[r.roleName])
+          ? att.attendanceData[r.roleName][dayIdx]
+          : required; // default to fully compliant if no log exists
+        
+        totalAttendedSum += attended;
+        totalRequiredSum += required;
+      });
+    });
+
+    attendanceCompliance = totalRequiredSum > 0 
+      ? Math.min(100, (totalAttendedSum / totalRequiredSum) * 100) 
+      : 100.0;
+  }
+
+  // 4. Final Weighted Score calculation
+  let totalWeight = 0;
+  let weightedSum = 0;
+
+  kpis.forEach(k => {
+    // Check if the KPI is active based on type filters
+    let isActive = true;
+    if (k.id === 'kpi-camiones' && !selectedTypes.includes('Camión Fábrica')) isActive = false;
+    if (k.id === 'kpi-cargadores' && !selectedTypes.includes('Cargador Frontal')) isActive = false;
+    if (k.id === 'kpi-polvorines' && !selectedTypes.includes('Polvorín Móvil')) isActive = false;
+
+    if (isActive) {
+      let compliance = 100.0;
+      if (k.id === 'kpi-camiones') {
+        compliance = byType['Camión Fábrica']?.contractualAvailability ?? 100.0;
+      } else if (k.id === 'kpi-cargadores') {
+        compliance = byType['Cargador Frontal']?.contractualAvailability ?? 100.0;
+      } else if (k.id === 'kpi-polvorines') {
+        compliance = byType['Polvorín Móvil']?.contractualAvailability ?? 100.0;
+      } else if (k.id === 'kpi-insumos') {
+        compliance = rawMaterialsCompliance;
+      } else if (k.category === 'calidad') {
+        compliance = qualityCompliancesMap[k.id] ?? 100.0;
+      } else if (k.id === 'kpi-dotacion-comprometida') {
+        compliance = attendanceCompliance;
+      }
+
+      totalWeight += k.weight;
+      weightedSum += k.weight * compliance;
+    }
+  });
+
+  const weightedScore = totalWeight > 0 ? (weightedSum / totalWeight) : 100.0;
+
   return {
     overallPhysical: totalPhysicalTargetHours > 0 ? (totalPhysicalDeliveredHours / totalPhysicalTargetHours) * 100 : 100,
     overallContractual: totalContractTargetHours > 0 ? (totalContractDeliveredHours / totalContractTargetHours) * 100 : 100,
     byType,
     dailyHistory,
     faultBreakdown,
-    totalBackupCoveredHours
+    totalBackupCoveredHours,
+    // NEW OUTPUTS
+    rawMaterialsCompliance,
+    qualityCompliancesMap,
+    attendanceCompliance,
+    weightedScore
   };
 };
 
@@ -328,7 +437,6 @@ export const exportToCSV = (
     'Comentario / Causa'
   ];
 
-  // Map data to rows
   const rows = records.map(r => {
     const eq = fleet.find(e => e.id === r.equipmentId);
     return [
@@ -340,17 +448,15 @@ export const exportToCSV = (
       r.status,
       r.hoursAvailable.toString(),
       r.hoursOutOfService.toString(),
-      `"${(r.comment || '').replace(/"/g, '""')}"` // Escape quotes
+      `"${(r.comment || '').replace(/"/g, '""')}"`
     ];
   });
 
-  // Join headers and rows
   const csvContent = [
     headers.join(';'),
     ...rows.map(e => e.join(';'))
   ].join('\n');
 
-  // Create a Blob with UTF-8 BOM to ensure Excel opens special characters correctly
   const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   

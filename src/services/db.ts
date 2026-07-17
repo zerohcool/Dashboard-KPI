@@ -29,10 +29,50 @@ export interface AvailabilityRecord {
   comment: string;
 }
 
+// NEW INTERFACES FOR PHASE 16
+export interface DailyRawMaterials {
+  date: string;
+  nitratoStock: number;
+  matrizStock: number;
+}
+
+export interface ContractKPI {
+  id: string;
+  category: 'disponibilidad' | 'calidad' | 'dotacion';
+  name: string;
+  weight: number;
+  unit: string;
+  periodicity: string;
+  minVal: string;
+  expectedVal: string;
+  maxVal: string;
+}
+
+export interface DailyQualityCompliance {
+  date: string;
+  kpiId: string;
+  compliancePct: number;
+}
+
+export interface ContractRole {
+  roleName: string;
+  requiredCount: number;
+}
+
+export interface WeeklyAttendance {
+  weekStartDate: string; // YYYY-MM-DD (Wednesday)
+  attendanceData: Record<string, number[]>; // Maps roleName -> 7 numbers (Wednesday to Tuesday)
+}
+
 const STORAGE_KEYS = {
   EQUIPMENT: 'disponibilidad_equipos_fleet',
   SETTINGS: 'disponibilidad_equipos_settings',
-  RECORDS: 'disponibilidad_equipos_records'
+  RECORDS: 'disponibilidad_equipos_records',
+  RAW_MATERIALS: 'disponibilidad_equipos_raw_materials',
+  CONTRACT_KPIS: 'disponibilidad_equipos_contract_kpis',
+  QUALITY_COMPLIANCE: 'disponibilidad_equipos_quality_compliance',
+  CONTRACT_ROLES: 'disponibilidad_equipos_contract_roles',
+  WEEKLY_ATTENDANCE: 'disponibilidad_equipos_weekly_attendance'
 };
 
 const DEFAULT_SETTINGS: ContractSettings = {
@@ -42,9 +82,56 @@ const DEFAULT_SETTINGS: ContractSettings = {
   requiredPickups: 8
 };
 
+// Seed KPIs list
+const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
+  // Disponibilidad e Insumos
+  { id: 'kpi-camiones', category: 'disponibilidad', name: 'Disponibilidad de Camiones Fabrica', weight: 10, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
+  { id: 'kpi-cargadores', category: 'disponibilidad', name: 'Disponibilidad de Cargador frontales (Tapapozos)', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
+  { id: 'kpi-polvorines', category: 'disponibilidad', name: 'Disponibilidad de Polvorines Móviles', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
+  { id: 'kpi-insumos', category: 'disponibilidad', name: 'Disponibilidad de Insumos', weight: 5, unit: 'ton', periodicity: 'diario', minVal: '170', expectedVal: '200', maxVal: '200' },
+  // Calidad de Servicio
+  { id: 'kpi-innovacion', category: 'calidad', name: 'Eficiencia: Índice de innovación y pruebas', weight: 5, unit: 'informe', periodicity: 'mensual', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
+  { id: 'kpi-costos', category: 'calidad', name: 'Eficiencia: Control de costos USD/ton-tron', weight: 10, unit: 'informe', periodicity: 'semanal', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
+  { id: 'kpi-horario-tronadura', category: 'calidad', name: 'cumplimiento del horario de tronadura', weight: 5, unit: 'minutos', periodicity: 'Diaria', minVal: '15 minutos de perdida', expectedVal: '0 minutos de perdida', maxVal: 'Estar preparado antes de la hora' },
+  { id: 'kpi-programa-tronadura', category: 'calidad', name: 'cumplimiento de programa de tronadura', weight: 3, unit: '%', periodicity: 'semanal', minVal: '<90%', expectedVal: '90%', maxVal: '100%' },
+  { id: 'kpi-p80', category: 'calidad', name: 'cumplir con los parámetros de P80 según tipo de material', weight: 3, unit: 'pulgadas', periodicity: 'mensual', minVal: '6', expectedVal: '5.5', maxVal: '5' },
+  { id: 'kpi-criterios-danio', category: 'calidad', name: 'Cumplimiento de criterios de daño', weight: 8, unit: '%', periodicity: 'mensual', minVal: '<80%', expectedVal: '80%', maxVal: '90%' },
+  { id: 'kpi-tiros-quedados', category: 'calidad', name: 'Tiros quedados (TQ)', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '>0', expectedVal: '0', maxVal: '0' },
+  { id: 'kpi-ptq', category: 'calidad', name: 'medir la cantidad de PTQ en base a benchmark de las minas de Chile', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '>4', expectedVal: '4', maxVal: '3' },
+  { id: 'kpi-flyrock', category: 'calidad', name: 'impactos en equipos por flyrock', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '>0', expectedVal: '0', maxVal: '0' },
+  { id: 'kpi-vod', category: 'calidad', name: 'Medición y cumplimiento de VOD en los productos', weight: 3, unit: 'unidad', periodicity: 'mensual', minVal: '4', expectedVal: '6', maxVal: '8' },
+  { id: 'kpi-gases', category: 'calidad', name: 'Control de gases nitrosos', weight: 3, unit: 'evento', periodicity: 'mensual', minVal: '>1', expectedVal: '1', maxVal: '1' },
+  // Dotación
+  { id: 'kpi-dotacion-comprometida', category: 'dotacion', name: 'Asegurar la dotación comprometida para la operación normal de la flota', weight: 10, unit: '%', periodicity: 'Semanal', minVal: '90% de la dotación', expectedVal: '95% de la dotación', maxVal: '100% de la dotación' }
+];
+
+const DEFAULT_CONTRACT_ROLES: ContractRole[] = [
+  { roleName: 'Administrador', requiredCount: 1 },
+  { roleName: 'Jefe de Operaciones', requiredCount: 1 },
+  { roleName: 'Supervisor de tronadora', requiredCount: 1 },
+  { roleName: 'Capataz de tronadura', requiredCount: 1 },
+  { roleName: 'HSEC', requiredCount: 1 },
+  { roleName: 'Chofer Operador Camion fabrica', requiredCount: 6 },
+  { roleName: 'Chofer Operador Equipo Auxiliar', requiredCount: 3 },
+  { roleName: 'Cargador de Tiros', requiredCount: 4 },
+  { roleName: 'Encargado de Patio', requiredCount: 1 },
+  { roleName: 'Tecnico en Mantenimiento', requiredCount: 2 },
+  { roleName: 'Administrativo', requiredCount: 1 },
+  { roleName: 'Ingeniero de tronadura', requiredCount: 1 },
+  { roleName: 'Asistencia Tecnica', requiredCount: 1 }
+];
+
 const generateId = () => Math.random().toString(36).substr(2, 9).toUpperCase();
 
-// Helper to parse HH:MM blasting time to decimal hours
+// Helper to find the Wednesday preceding or equal to a given date
+export const getWednesdayStartDate = (dateStr: string): string => {
+  const d = new Date(dateStr + 'T12:00:00');
+  const day = d.getDay(); // 0 (Sun) to 6 (Sat)
+  const diff = day >= 3 ? day - 3 : day + 4;
+  d.setDate(d.getDate() - diff);
+  return d.toISOString().split('T')[0];
+};
+
 export const parseBlastingTimeToDecimal = (timeStr: string): number => {
   const parts = String(timeStr).split(':');
   if (parts.length === 2) {
@@ -53,7 +140,7 @@ export const parseBlastingTimeToDecimal = (timeStr: string): number => {
     return h + m / 60;
   }
   const decimalHour = parseFloat(timeStr);
-  return isNaN(decimalHour) ? 19 : decimalHour; // fallback
+  return isNaN(decimalHour) ? 19 : decimalHour;
 };
 
 export const dbService = {
@@ -120,6 +207,65 @@ export const dbService = {
         requiredPickups: setLocal.required_pickups
       };
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsMapped));
+    }
+
+    // 5. Fetch daily raw materials
+    const { data: rawData, error: rawErr } = await supabase.from('daily_raw_materials').select('*');
+    if (!rawErr && rawData) {
+      const mapped: DailyRawMaterials[] = rawData.map((row: any) => ({
+        date: row.date,
+        nitratoStock: parseFloat(row.nitrato_stock),
+        matrizStock: parseFloat(row.matriz_stock)
+      }));
+      localStorage.setItem(STORAGE_KEYS.RAW_MATERIALS, JSON.stringify(mapped));
+    }
+
+    // 6. Fetch contract KPIs weights
+    const { data: kpiData, error: kpiErr } = await supabase.from('contract_kpis').select('*');
+    if (!kpiErr && kpiData) {
+      const mapped: ContractKPI[] = kpiData.map((row: any) => ({
+        id: row.id,
+        category: row.category as ContractKPI['category'],
+        name: row.name,
+        weight: parseFloat(row.weight),
+        unit: row.unit,
+        periodicity: row.periodicity,
+        minVal: row.min_val,
+        expectedVal: row.expected_val,
+        maxVal: row.max_val
+      }));
+      localStorage.setItem(STORAGE_KEYS.CONTRACT_KPIS, JSON.stringify(mapped));
+    }
+
+    // 7. Fetch daily quality compliance
+    const { data: qualData, error: qualErr } = await supabase.from('daily_quality_compliance').select('*');
+    if (!qualErr && qualData) {
+      const mapped: DailyQualityCompliance[] = qualData.map((row: any) => ({
+        date: row.date,
+        kpiId: row.kpi_id,
+        compliancePct: parseFloat(row.compliance_pct)
+      }));
+      localStorage.setItem(STORAGE_KEYS.QUALITY_COMPLIANCE, JSON.stringify(mapped));
+    }
+
+    // 8. Fetch contract roles dotation
+    const { data: roleData, error: roleErr } = await supabase.from('contract_roles').select('*');
+    if (!roleErr && roleData) {
+      const mapped: ContractRole[] = roleData.map((row: any) => ({
+        roleName: row.role_name,
+        requiredCount: row.required_count
+      }));
+      localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(mapped));
+    }
+
+    // 9. Fetch weekly attendance roster
+    const { data: attData, error: attErr } = await supabase.from('weekly_attendance').select('*');
+    if (!attErr && attData) {
+      const mapped: WeeklyAttendance[] = attData.map((row: any) => ({
+        weekStartDate: row.week_start_date,
+        attendanceData: row.attendance_data
+      }));
+      localStorage.setItem(STORAGE_KEYS.WEEKLY_ATTENDANCE, JSON.stringify(mapped));
     }
   },
 
@@ -269,7 +415,7 @@ export const dbService = {
 
   getBlastingTimeForDate(date: string): string {
     const data = localStorage.getItem('disponibilidad_equipos_blasting_times');
-    if (!data) return '19:00'; // default 19:00
+    if (!data) return '19:00';
     const map = JSON.parse(data);
     const val = map[date];
     if (val === undefined) return '19:00';
@@ -301,7 +447,6 @@ export const dbService = {
     const allRecords = this.getAllRecords();
     const blastingTime = this.getBlastingTimeForDate(date);
     
-    // Filter out existing records for this date to overwrite locally
     let updatedRecords = allRecords.filter(r => r.date !== date);
     const recordsToInsert: AvailabilityRecord[] = [];
     
@@ -342,11 +487,9 @@ export const dbService = {
     localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(updatedRecords));
 
     if (supabase) {
-      // 1. Delete old entries for this date
       const { error: delError } = await supabase.from('availability_records').delete().eq('date', date);
       if (delError) throw delError;
 
-      // 2. Insert new ones
       if (recordsToInsert.length > 0) {
         const { error: insError } = await supabase.from('availability_records').insert(
           recordsToInsert.map(r => ({
@@ -364,6 +507,159 @@ export const dbService = {
         );
         if (insError) throw insError;
       }
+    }
+  },
+
+  // NEW DATABASE METHODS FOR PHASE 16
+  getContractKPIs(): ContractKPI[] {
+    const data = localStorage.getItem(STORAGE_KEYS.CONTRACT_KPIS);
+    if (!data) {
+      localStorage.setItem(STORAGE_KEYS.CONTRACT_KPIS, JSON.stringify(DEFAULT_CONTRACT_KPIS));
+      return DEFAULT_CONTRACT_KPIS;
+    }
+    return JSON.parse(data);
+  },
+
+  async saveContractKPIs(kpis: ContractKPI[]): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.CONTRACT_KPIS, JSON.stringify(kpis));
+    if (supabase) {
+      const { error } = await supabase.from('contract_kpis').upsert(
+        kpis.map(k => ({
+          id: k.id,
+          category: k.category,
+          name: k.name,
+          weight: k.weight,
+          unit: k.unit,
+          periodicity: k.periodicity,
+          min_val: k.minVal,
+          expected_val: k.expectedVal,
+          max_val: k.maxVal
+        }))
+      );
+      if (error) throw error;
+    }
+  },
+
+  getRawMaterials(): DailyRawMaterials[] {
+    const data = localStorage.getItem(STORAGE_KEYS.RAW_MATERIALS);
+    if (!data) return [];
+    return JSON.parse(data);
+  },
+
+  getRawMaterialsForDate(date: string): DailyRawMaterials {
+    const all = this.getRawMaterials();
+    const found = all.find(r => r.date === date);
+    return found || { date, nitratoStock: 200, matrizStock: 200 }; // default 200 ton
+  },
+
+  getRawMaterialsForRange(startDate: string, endDate: string): DailyRawMaterials[] {
+    const all = this.getRawMaterials();
+    return all.filter(r => r.date >= startDate && r.date <= endDate);
+  },
+
+  async saveRawMaterialsForDate(date: string, nitrato: number, matriz: number): Promise<void> {
+    const all = this.getRawMaterials().filter(r => r.date !== date);
+    const newRow: DailyRawMaterials = { date, nitratoStock: nitrato, matrizStock: matriz };
+    all.push(newRow);
+    localStorage.setItem(STORAGE_KEYS.RAW_MATERIALS, JSON.stringify(all));
+
+    if (supabase) {
+      const { error } = await supabase.from('daily_raw_materials').upsert({
+        date,
+        nitrato_stock: nitrato,
+        matriz_stock: matriz
+      });
+      if (error) throw error;
+    }
+  },
+
+  getQualityCompliances(): DailyQualityCompliance[] {
+    const data = localStorage.getItem(STORAGE_KEYS.QUALITY_COMPLIANCE);
+    if (!data) return [];
+    return JSON.parse(data);
+  },
+
+  getQualityComplianceForDate(date: string): DailyQualityCompliance[] {
+    const all = this.getQualityCompliances();
+    return all.filter(q => q.date === date);
+  },
+
+  getQualityComplianceForRange(startDate: string, endDate: string): DailyQualityCompliance[] {
+    const all = this.getQualityCompliances();
+    return all.filter(q => q.date >= startDate && q.date <= endDate);
+  },
+
+  async saveQualityComplianceForDate(date: string, kpiId: string, compliancePct: number): Promise<void> {
+    const all = this.getQualityCompliances().filter(q => !(q.date === date && q.kpiId === kpiId));
+    all.push({ date, kpiId, compliancePct });
+    localStorage.setItem(STORAGE_KEYS.QUALITY_COMPLIANCE, JSON.stringify(all));
+
+    if (supabase) {
+      const { error } = await supabase.from('daily_quality_compliance').upsert({
+        date,
+        kpi_id: kpiId,
+        compliance_pct: compliancePct
+      });
+      if (error) throw error;
+    }
+  },
+
+  getContractRoles(): ContractRole[] {
+    const data = localStorage.getItem(STORAGE_KEYS.CONTRACT_ROLES);
+    if (!data) {
+      localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(DEFAULT_CONTRACT_ROLES));
+      return DEFAULT_CONTRACT_ROLES;
+    }
+    return JSON.parse(data);
+  },
+
+  async saveContractRoles(roles: ContractRole[]): Promise<void> {
+    localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(roles));
+    if (supabase) {
+      const { error } = await supabase.from('contract_roles').upsert(
+        roles.map(r => ({
+          role_name: r.roleName,
+          required_count: r.requiredCount
+        }))
+      );
+      if (error) throw error;
+    }
+  },
+
+  getWeeklyAttendance(weekStartDate: string): WeeklyAttendance {
+    const data = localStorage.getItem(STORAGE_KEYS.WEEKLY_ATTENDANCE);
+    const list: WeeklyAttendance[] = data ? JSON.parse(data) : [];
+    const found = list.find(w => w.weekStartDate === weekStartDate);
+    
+    // Default attendance with required counts if not registered
+    if (!found) {
+      const roles = this.getContractRoles();
+      const defaultData: Record<string, number[]> = {};
+      roles.forEach(r => {
+        defaultData[r.roleName] = Array(7).fill(r.requiredCount);
+      });
+      return { weekStartDate, attendanceData: defaultData };
+    }
+    return found;
+  },
+
+  getWeeklyAttendanceList(): WeeklyAttendance[] {
+    const data = localStorage.getItem(STORAGE_KEYS.WEEKLY_ATTENDANCE);
+    if (!data) return [];
+    return JSON.parse(data);
+  },
+
+  async saveWeeklyAttendance(weekStartDate: string, attendanceData: Record<string, number[]>): Promise<void> {
+    const list = this.getWeeklyAttendanceList().filter(w => w.weekStartDate !== weekStartDate);
+    list.push({ weekStartDate, attendanceData });
+    localStorage.setItem(STORAGE_KEYS.WEEKLY_ATTENDANCE, JSON.stringify(list));
+
+    if (supabase) {
+      const { error } = await supabase.from('weekly_attendance').upsert({
+        week_start_date: weekStartDate,
+        attendance_data: attendanceData
+      });
+      if (error) throw error;
     }
   },
 
@@ -421,6 +717,8 @@ export const dbService = {
 
     localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(initialFleet));
     localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(DEFAULT_SETTINGS));
+    localStorage.setItem(STORAGE_KEYS.CONTRACT_KPIS, JSON.stringify(DEFAULT_CONTRACT_KPIS));
+    localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(DEFAULT_CONTRACT_ROLES));
 
     // Seed 14 days of history (including today)
     const historyRecords: AvailabilityRecord[] = [];
@@ -441,15 +739,15 @@ export const dbService = {
         if (eq.type === 'Camión Fábrica') {
           if (rand < 0.08) {
             status = 'Mantención Preventiva';
-            hoursOutOfService = Math.floor(Math.random() * 6) + 4; // 4-10 hours
+            hoursOutOfService = Math.floor(Math.random() * 6) + 4;
             comment = 'Mantención preventiva de 250 horas';
           } else if (rand < 0.12) {
             status = 'Mantención Programada';
-            hoursOutOfService = Math.floor(Math.random() * 8) + 4; // 4-12 hours
+            hoursOutOfService = Math.floor(Math.random() * 8) + 4;
             comment = 'Ajuste programado de tolva';
           } else if (rand < 0.14) {
             status = 'Mantención Correctiva';
-            hoursOutOfService = 12; // All day
+            hoursOutOfService = 12;
             comment = 'Fuga de aceite en motor de descarga';
           } else if (rand < 0.16) {
             status = 'Mantención Predictiva';

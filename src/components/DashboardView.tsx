@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { dbService } from '../services/db';
 import type { Equipment } from '../services/db';
-import { calculateMetrics, exportToCSV, getPluralType } from '../utils/calculations';
+import { calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours } from '../utils/calculations';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   BarChart, Bar, Cell, PieChart, Pie
@@ -260,9 +260,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
           return eq?.type === t;
         });
 
-        let typeDayAvail = 0;
-        typeRecords.forEach(r => { typeDayAvail += r.hoursAvailable; });
-        sum += Math.min(typeDayAvail, req * 12);
+        const dayHours = calculateTypeDailyHours(req, typeRecords);
+        sum += dayHours.contractDelivered;
       });
     });
 
@@ -270,16 +269,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   }, [records, selectedTypes, settings, fleet]);
 
   const totalHoursDown = useMemo(() => {
-    let sum = 0;
-    const activeEqIds = new Set(fleet.filter(eq => selectedTypes.includes(eq.type)).map(eq => eq.id));
-    
-    records.forEach(r => {
-      if (activeEqIds.has(r.equipmentId)) {
-        sum += (r.hoursOutOfService - (r.hoursPostBlasting || 0));
-      }
-    });
-    return sum;
-  }, [records, fleet, selectedTypes]);
+    return Math.max(0, totalContractTargetHours - totalContractDeliveredHours);
+  }, [totalContractTargetHours, totalContractDeliveredHours]);
 
   const COLORS = ['#f59e0b', '#0284c7', '#8b5cf6', '#ef4444']; // Prog, Prev, Pred, Corr
 
@@ -479,7 +470,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
           <div className="kpi-value" style={{ color: 'var(--color-mantencioncorrectiva)' }}>
             {totalHoursDown.toLocaleString()} hrs
           </div>
-          <span className="kpi-subtext">Detenciones antes de la hora de tronadura</span>
+          <span className="kpi-subtext">
+            Sin cobertura. Respaldos cubrieron {metrics.totalBackupCoveredHours.toLocaleString()} hrs.
+          </span>
         </div>
       </div>
 

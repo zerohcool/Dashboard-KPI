@@ -38,6 +38,106 @@ export interface DetailedRecordRow {
   comment: string;
 }
 
+interface Interval {
+  start: number;
+  end: number;
+}
+
+export const calculateTypeDailyHours = (
+  requiredCount: number,
+  records: AvailabilityRecord[]
+): {
+  contractDelivered: number;
+  contractTarget: number;
+  backupCovered: number;
+  uncoveredDown: number;
+} => {
+  const contractTarget = requiredCount * 12;
+  const N = records.length;
+  
+  if (N === 0) {
+    return {
+      contractDelivered: 0,
+      contractTarget,
+      backupCovered: 0,
+      uncoveredDown: contractTarget
+    };
+  }
+
+  const B = Math.max(0, N - requiredCount);
+
+  // Collect down intervals
+  const downIntervals: Interval[] = [];
+  records.forEach(r => {
+    if (r.status !== 'Operativo') {
+      const start = r.startHour;
+      const end = r.endHour - (r.hoursPostBlasting || 0);
+      if (start < end) {
+        downIntervals.push({ start, end });
+      }
+    }
+  });
+
+  const deficitUnits = Math.max(0, requiredCount - N);
+  const deficitHours = deficitUnits * 12;
+
+  // If there are no failures, deliver contract target minus any shortage deficit
+  if (downIntervals.length === 0) {
+    return {
+      contractDelivered: Math.max(0, contractTarget - deficitHours),
+      contractTarget,
+      backupCovered: 0,
+      uncoveredDown: deficitHours
+    };
+  }
+
+  // Decompose into unique time boundaries inside shift (7 to 19)
+  const timePointsSet = new Set<number>();
+  timePointsSet.add(7.0);
+  timePointsSet.add(19.0);
+  downIntervals.forEach(inv => {
+    timePointsSet.add(inv.start);
+    timePointsSet.add(inv.end);
+  });
+
+  const T = Array.from(timePointsSet).sort((a, b) => a - b);
+  
+  let totalUncoveredHours = 0;
+  let totalBackupCoveredHours = 0;
+
+  for (let i = 0; i < T.length - 1; i++) {
+    const tStart = T[i];
+    const tEnd = T[i + 1];
+    if (tStart >= 19.0 || tEnd <= 7.0) continue;
+
+    const width = tEnd - tStart;
+    const mid = (tStart + tEnd) / 2;
+
+    // Count how many units are down in this sub-interval
+    let activeDownCount = 0;
+    downIntervals.forEach(inv => {
+      if (mid >= inv.start && mid <= inv.end) {
+        activeDownCount++;
+      }
+    });
+
+    const uncoveredRate = Math.max(0, activeDownCount - B);
+    const coveredRate = Math.min(activeDownCount, B);
+
+    totalUncoveredHours += uncoveredRate * width;
+    totalBackupCoveredHours += coveredRate * width;
+  }
+
+  const contractDelivered = Math.max(0, contractTarget - deficitHours - totalUncoveredHours);
+
+  return {
+    contractDelivered,
+    contractTarget,
+    backupCovered: totalBackupCoveredHours,
+    uncoveredDown: totalUncoveredHours + deficitHours
+  };
+};
+
 export const calculateMetrics = (
   fleet: Equipment[],
   records: AvailabilityRecord[],
@@ -50,6 +150,7 @@ export const calculateMetrics = (
   byType: Partial<Record<Equipment['type'], TypeMetrics>>;
   dailyHistory: DailyAvailability[];
   faultBreakdown: { name: string; value: number }[];
+  totalBackupCoveredHours: number;
 } => {
   const types = selectedTypes;
   
@@ -94,6 +195,7 @@ export const calculateMetrics = (
   let totalContractDeliveredHours = 0;
   let totalPhysicalTargetHours = 0;
   let totalPhysicalDeliveredHours = 0;
+  let totalBackupCoveredHours = 0;
 
   dates.forEach(date => {
     const dayRecords = recordsByDate[date] || [];
@@ -109,9 +211,6 @@ export const calculateMetrics = (
       const typeRecords = dayRecords.filter(r => typeEqIds.has(r.equipmentId));
       const required = getRequiredCount(t);
 
-      // Total physical target hours for this type on this day
-      // (If there are no records yet, we assume they are 100% available or count 0?
-      // Since seed has all records, we sum existing records or calculate based on fleet size)
       const fleetSize = typeEquipment.length;
       dayPhysicalTarget += fleetSize * 12;
       
@@ -122,12 +221,12 @@ export const calculateMetrics = (
 
       dayPhysicalDelivered += typeDayAvailableHours;
 
-      // Contract calculations:
-      const typeContractTarget = required * 12;
-      const typeContractDelivered = Math.min(typeDayAvailableHours, typeContractTarget);
-
-      dayContractTarget += typeContractTarget;
-      dayContractDelivered += typeContractDelivered;
+      // Contract calculations using backup overlap logic:
+      const dayHours = calculateTypeDailyHours(required, typeRecords);
+      
+      dayContractTarget += dayHours.contractTarget;
+      dayContractDelivered += dayHours.contractDelivered;
+      totalBackupCoveredHours += dayHours.backupCovered;
 
       // Accumulate into totals by type
       byType[t].hoursAvailable += typeDayAvailableHours;
@@ -156,7 +255,7 @@ export const calculateMetrics = (
       ? (byType[t].hoursAvailable / totalPhysicalTarget) * 100 
       : 100;
 
-    // Contractual availability over the period (summing the capped daily hours)
+    // Contractual availability over the period (summing the capped daily hours using overlap logic)
     let totalCappedContractHours = 0;
     dates.forEach(date => {
       const dayRecords = recordsByDate[date] || [];
@@ -165,10 +264,8 @@ export const calculateMetrics = (
         return eq?.type === t;
       });
       
-      let daySum = 0;
-      typeRecords.forEach(r => { daySum += r.hoursAvailable; });
-      
-      totalCappedContractHours += Math.min(daySum, required * 12);
+      const dayHours = calculateTypeDailyHours(required, typeRecords);
+      totalCappedContractHours += dayHours.contractDelivered;
     });
 
     const totalContractTarget = required * 12 * Math.max(1, dates.length);
@@ -201,7 +298,6 @@ export const calculateMetrics = (
   })).filter(item => item.value > 0);
 
   if (faultBreakdown.length === 0) {
-    // Empty chart fallback
     faultBreakdown.push({ name: 'Sin fallas', value: 0 });
   }
 
@@ -210,7 +306,8 @@ export const calculateMetrics = (
     overallContractual: totalContractTargetHours > 0 ? (totalContractDeliveredHours / totalContractTargetHours) * 100 : 100,
     byType,
     dailyHistory,
-    faultBreakdown
+    faultBreakdown,
+    totalBackupCoveredHours
   };
 };
 

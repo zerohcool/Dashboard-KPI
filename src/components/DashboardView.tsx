@@ -451,13 +451,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     });
   }, [rawMaterials]);
 
-  // New Tab: Dotación Roster metrics
+  // New Tab: Dotación Roster metrics (Phase 20)
   const attendanceStats = useMemo(() => {
     const datesList = Object.keys(recordsByDate).sort();
     if (datesList.length === 0 || roles.length === 0) return [];
     
+    // Filter out roles that do not affect the KPI (Enaex support roles)
+    const activeRoles = roles.filter(r => r.affectsKPI !== false);
+    
     const statsMap: Record<string, { roleName: string; shift: string; totalAttended: number; totalRequired: number; countDays: number }> = {};
-    roles.forEach(r => {
+    activeRoles.forEach(r => {
       const shift = getRoleShiftType(r.roleName);
       statsMap[r.roleName] = {
         roleName: r.roleName,
@@ -475,8 +478,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
       const d = new Date(dateStr + 'T12:00:00');
       const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0
 
-      roles.forEach(r => {
+      activeRoles.forEach(r => {
         const shift = getRoleShiftType(r.roleName);
+        
+        // Skip Friday (2), Saturday (3), and Sunday (4) for 4x3 shift roles
+        if (shift === '4x3' && (dayIdx === 2 || dayIdx === 3 || dayIdx === 4)) {
+          return;
+        }
+
         const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
         const attended = (att && att.attendanceData[r.roleName])
           ? att.attendanceData[r.roleName][dayIdx]
@@ -495,7 +504,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         roleName: s.roleName,
         shift: s.shift,
         avgAttended: parseFloat(avgAtt.toFixed(1)),
-        requiredDaily: s.totalRequired / s.countDays,
+        requiredDaily: s.countDays > 0 ? parseFloat((s.totalRequired / s.countDays).toFixed(1)) : 0,
         compliance: Math.min(100, parseFloat(compliance.toFixed(1)))
       };
     });

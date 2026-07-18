@@ -41,6 +41,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   const [formState, setFormState] = useState<Record<string, FormRecordState>>({});
   const [selectedEqIds, setSelectedEqIds] = useState<Set<string>>(new Set());
   const [blastingTime, setBlastingTime] = useState<string>('19:00');
+  const [isNoBlasting, setIsNoBlasting] = useState<boolean>(false);
   const [showEqSelector, setShowEqSelector] = useState<boolean>(false);
 
   // Tab 2: Raw Materials State
@@ -56,6 +57,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   useEffect(() => {
     const dailyBlasting = dbService.getBlastingTimeForDate(selectedDate);
     setBlastingTime(dailyBlasting);
+    setIsNoBlasting(dailyBlasting === '07:00');
 
     const raw = dbService.getRawMaterialsForDate(selectedDate);
     setNitratoStock(raw.nitratoStock);
@@ -304,6 +306,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     setSelectedEqIds(selectedIds);
     const prevBlasting = dbService.getBlastingTimeForDate(prevDateStr);
     setBlastingTime(prevBlasting);
+    setIsNoBlasting(prevBlasting === '07:00');
 
     const prevRaw = dbService.getRawMaterialsForDate(prevDateStr);
     setNitratoStock(prevRaw.nitratoStock);
@@ -397,6 +400,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
               <span className="filter-label">Hora de Tronadura (24 hrs)</span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                 <select
+                  disabled={isNoBlasting}
                   value={blastingHour}
                   onChange={(e) => {
                     const h = parseInt(e.target.value, 10);
@@ -404,14 +408,15 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                     const mStr = blastingMin < 10 ? `0${blastingMin}` : `${blastingMin}`;
                     handleBlastingTimeChange(`${hStr}:${mStr}`);
                   }}
-                  style={{ width: '70px', fontWeight: 'bold', padding: '8px' }}
+                  style={{ width: '70px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
                 >
                   {hoursList.map(h => (
                     <option key={h} value={h}>{h < 10 ? `0${h}` : `${h}`}</option>
                   ))}
                 </select>
-                <span style={{ fontWeight: 'bold' }}>:</span>
+                <span style={{ fontWeight: 'bold', opacity: isNoBlasting ? 0.6 : 1 }}>:</span>
                 <select
+                  disabled={isNoBlasting}
                   value={blastingMin}
                   onChange={(e) => {
                     const m = parseInt(e.target.value, 10);
@@ -419,13 +424,35 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                     const mStr = m < 10 ? `0${m}` : `${m}`;
                     handleBlastingTimeChange(`${hStr}:${mStr}`);
                   }}
-                  style={{ width: '75px', fontWeight: 'bold', padding: '8px' }}
+                  style={{ width: '75px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
                 >
                   {Array.from({ length: 60 }, (_, i) => i).map(m => (
                     <option key={m} value={m}>{m < 10 ? `0${m}` : `${m}`}</option>
                   ))}
                 </select>
-                <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>hrs</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', opacity: isNoBlasting ? 0.6 : 1, marginRight: '8px' }}>hrs</span>
+                
+                {/* Sin Tronadura Selector */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.03)', padding: '6px 10px', borderRadius: '6px', userSelect: 'none' }}>
+                  <input
+                    type="checkbox"
+                    id="no-blasting-chk"
+                    checked={isNoBlasting}
+                    onChange={(e) => {
+                      const checked = e.target.checked;
+                      setIsNoBlasting(checked);
+                      if (checked) {
+                        handleBlastingTimeChange('07:00');
+                      } else {
+                        handleBlastingTimeChange('19:00'); // default
+                      }
+                    }}
+                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                  />
+                  <label htmlFor="no-blasting-chk" style={{ fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                    Sin Tronadura
+                  </label>
+                </div>
               </div>
             </div>
 
@@ -519,7 +546,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           }}
         >
           <Users size={16} />
-          <span>3. Roster de Dotación (Semanal)</span>
+          <span>3. Disponibilidad de Dotación (Semanal)</span>
         </button>
       </div>
 

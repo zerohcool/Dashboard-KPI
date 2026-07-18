@@ -628,7 +628,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
           }}
         >
           <Users size={16} />
-          <span>Dotación Roster</span>
+          <span>Disponibilidad de Dotación</span>
         </button>
 
         <button 
@@ -1202,13 +1202,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               <div className="kpi-value" style={{ color: 'var(--color-mantencionpreventiva)' }}>
                 {metrics.attendanceCompliance.toFixed(1)}%
               </div>
-              <span className="kpi-subtext">Cumplimiento del roster semanal</span>
+              <span className="kpi-subtext">Cumplimiento de dotación semanal</span>
             </div>
 
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--secondary)' } as any}>
               <span className="kpi-title">Cargos Evaluados</span>
               <div className="kpi-value" style={{ color: 'var(--secondary)' }}>
-                {roles.length} Roles
+                {roles.filter(r => r.affectsKPI !== false).length} Roles
               </div>
               <span className="kpi-subtext">Puestos estipulados en contrato</span>
             </div>
@@ -1249,7 +1249,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             </div>
           </div>
 
-          {/* Detailed Attendance Roster Table */}
+          {/* Detailed Attendance Table */}
           <div className="glass table-card">
             <h2 className="chart-title">Desempeño y Asistencia por Cargo (Detalle de Turnos)</h2>
             <div className="table-wrapper">
@@ -1259,7 +1259,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     <th>Cargo / Puesto</th>
                     <th style={{ textAlign: 'center' }}>Jornada</th>
                     <th style={{ textAlign: 'center' }}>Dotación Contratada</th>
-                    <th style={{ textAlign: 'center' }}>Requerido Diario (Roster)</th>
+                    <th style={{ textAlign: 'center' }}>Requerido Diario (Contrato)</th>
                     <th style={{ textAlign: 'center' }}>Asistencia Promedio</th>
                     <th style={{ textAlign: 'center' }}>% Cumplimiento</th>
                     <th>Estado de Alerta</th>
@@ -1393,7 +1393,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                 {/* Asistencia */}
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                    <span>Asistencia Roster Semanal (Ponderación 10%)</span>
+                    <span>Asistencia de Dotación Semanal (Ponderación 10%)</span>
                     <strong>{metrics.attendanceCompliance.toFixed(1)}%</strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>

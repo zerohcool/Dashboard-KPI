@@ -74,10 +74,26 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     const existingAtt = dbService.getWeeklyAttendance(activeWeekStart);
     const initialRoster: Record<string, number[]> = {};
     contractRoles.forEach(r => {
-      const requiredDaily = getRoleShiftType(r.roleName) === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+      const shift = getRoleShiftType(r.roleName);
+      const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+      
+      const defaultArray = Array(7).fill(requiredDaily);
+      if (shift === '4x3') {
+        defaultArray[2] = 0; // Friday
+        defaultArray[3] = 0; // Saturday
+        defaultArray[4] = 0; // Sunday
+      }
+
       initialRoster[r.roleName] = existingAtt.attendanceData[r.roleName]
         ? [...existingAtt.attendanceData[r.roleName]]
-        : Array(7).fill(requiredDaily);
+        : defaultArray;
+
+      // Force 0 for 4x3 rest days for compatibility with old saved weekly logs
+      if (shift === '4x3' && initialRoster[r.roleName]) {
+        initialRoster[r.roleName][2] = 0;
+        initialRoster[r.roleName][3] = 0;
+        initialRoster[r.roleName][4] = 0;
+      }
     });
     setWeeklyRoster(initialRoster);
   }, [activeWeekStart]);
@@ -802,28 +818,36 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                     <tr key={r.roleName}>
                       <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{r.roleName}</td>
                       <td style={{ textAlign: 'center', fontWeight: 'bold', background: 'rgba(0,0,0,0.02)', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-                        {requiredDaily} pers
+                        {shift === '4x3' ? `${requiredDaily} pers (4d)` : `${requiredDaily} pers`}
                       </td>
-                      {arr.map((val, idx) => (
-                        <td key={idx} style={{ textAlign: 'center' }}>
-                          <input
-                            type="number"
-                            min="0"
-                            step={shift === '7x7' ? '0.5' : '1'}
-                            value={val}
-                            onChange={(e) => handleRosterCellChange(r.roleName, idx, parseFloat(e.target.value) || 0)}
-                            style={{ 
-                              width: '65px', 
-                              padding: '6px', 
-                              textAlign: 'center',
-                              border: val < requiredDaily ? '1px solid var(--color-mantencioncorrectiva)' : '1px solid var(--border-color)',
-                              background: val < requiredDaily ? 'var(--color-mantencioncorrectiva-bg)' : 'none',
-                              color: val < requiredDaily ? 'var(--color-mantencioncorrectiva)' : 'inherit',
-                              fontWeight: '600'
-                            }}
-                          />
-                        </td>
-                      ))}
+                      {arr.map((val, idx) => {
+                        const isRestDay4x3 = shift === '4x3' && (idx === 2 || idx === 3 || idx === 4);
+                        const cellVal = isRestDay4x3 ? 0 : val;
+                        const isUnderstaffed = !isRestDay4x3 && cellVal < requiredDaily;
+                        
+                        return (
+                          <td key={idx} style={{ textAlign: 'center', background: isRestDay4x3 ? 'rgba(0,0,0,0.04)' : 'none' }}>
+                            <input
+                              type="number"
+                              min="0"
+                              step={shift === '7x7' ? '0.5' : '1'}
+                              value={cellVal}
+                              disabled={isRestDay4x3}
+                              onChange={(e) => handleRosterCellChange(r.roleName, idx, parseFloat(e.target.value) || 0)}
+                              style={{ 
+                                width: '65px', 
+                                padding: '6px', 
+                                textAlign: 'center',
+                                border: isUnderstaffed ? '1px solid var(--color-mantencioncorrectiva)' : '1px solid var(--border-color)',
+                                background: isRestDay4x3 ? 'rgba(0,0,0,0.02)' : isUnderstaffed ? 'var(--color-mantencioncorrectiva-bg)' : 'none',
+                                color: isRestDay4x3 ? 'var(--text-muted)' : isUnderstaffed ? 'var(--color-mantencioncorrectiva)' : 'inherit',
+                                fontWeight: '600',
+                                opacity: isRestDay4x3 ? 0.6 : 1
+                              }}
+                            />
+                          </td>
+                        );
+                      })}
                     </tr>
                   );
                 })}

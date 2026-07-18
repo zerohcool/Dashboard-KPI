@@ -384,8 +384,17 @@ export const calculateMetrics = (
       const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0
 
       roles.forEach(r => {
+        // Skip roles that do not affect the KPI (Enaex custom roles)
+        if (r.affectsKPI === false) return;
+
+        const shift = getRoleShiftType(r.roleName);
+        // Skip Friday (2), Saturday (3), and Sunday (4) for 4x3 shift roles
+        if (shift === '4x3' && (dayIdx === 2 || dayIdx === 3 || dayIdx === 4)) {
+          return;
+        }
+
         // Divide by 2 for 7x7 cargos
-        const requiredDaily = getRoleShiftType(r.roleName) === '7x7' ? r.requiredCount / 2 : r.requiredCount;
+        const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
         
         const attended = (att && att.attendanceData[r.roleName])
           ? att.attendanceData[r.roleName][dayIdx]

@@ -6,7 +6,7 @@ import {
 } from '../utils/calculations';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  BarChart, Bar, Cell, PieChart, Pie
+  BarChart, Bar, Cell, PieChart, Pie, ReferenceLine
 } from 'recharts';
 import { 
   Download, FileDown, Clock, X, AlertTriangle, Award, Save, Layers, Users 
@@ -1102,6 +1102,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     }}
                   />
                   <Legend verticalAlign="top" height={36} />
+                  <ReferenceLine 
+                    y={200} 
+                    stroke="#ef4444" 
+                    strokeWidth={2} 
+                    strokeDasharray="4 4" 
+                    label={{ value: 'Mínimo Contrato (200 ton)', fill: '#ef4444', fontSize: 10, position: 'top', fontWeight: 'bold' }} 
+                  />
                   <Area 
                     type="monotone" 
                     dataKey="Nitrato" 

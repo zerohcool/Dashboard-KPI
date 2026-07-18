@@ -56,6 +56,7 @@ export interface DailyQualityCompliance {
 export interface ContractRole {
   roleName: string;
   requiredCount: number;
+  affectsKPI: boolean;
 }
 
 export interface WeeklyAttendance {
@@ -121,22 +122,22 @@ const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
 ];
 
 const DEFAULT_CONTRACT_ROLES: ContractRole[] = [
-  { roleName: 'Administrador (4x3)', requiredCount: 1 },
-  { roleName: 'HSEC (4x3)', requiredCount: 1 },
-  { roleName: 'Asistencia Tecnica (4x3)', requiredCount: 1 },
-  { roleName: 'Ingeniero de tronadura (4x3)', requiredCount: 1 },
-  { roleName: 'Jefe de Operaciones (7x7)', requiredCount: 2 },
-  { roleName: 'Supervisor de tronadura (7x7)', requiredCount: 2 },
-  { roleName: 'Capataz de tronadura (7x7)', requiredCount: 2 },
-  { roleName: 'HSEC (7x7)', requiredCount: 2 },
-  { roleName: 'Chofer Operador Camion fabrica (7x7)', requiredCount: 12 },
-  { roleName: 'Chofer Operador Equipo Auxiliar (7x7)', requiredCount: 6 },
-  { roleName: 'Cargador de Tiros (7x7)', requiredCount: 8 },
-  { roleName: 'Encargado de Patio (7x7)', requiredCount: 2 },
-  { roleName: 'Tecnico en Mantenimiento (7x7)', requiredCount: 4 },
-  { roleName: 'Administrativo (7x7)', requiredCount: 2 },
-  { roleName: 'Ingeniero de tronadura (7x7)', requiredCount: 2 },
-  { roleName: 'Asistencia Tecnica (7x7)', requiredCount: 2 }
+  { roleName: 'Administrador (4x3)', requiredCount: 1, affectsKPI: true },
+  { roleName: 'HSEC (4x3)', requiredCount: 1, affectsKPI: true },
+  { roleName: 'Asistencia Tecnica (4x3)', requiredCount: 1, affectsKPI: true },
+  { roleName: 'Ingeniero de tronadura (4x3)', requiredCount: 1, affectsKPI: true },
+  { roleName: 'Jefe de Operaciones (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Supervisor de tronadura (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Capataz de tronadura (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'HSEC (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Chofer Operador Camion fabrica (7x7)', requiredCount: 12, affectsKPI: true },
+  { roleName: 'Chofer Operador Equipo Auxiliar (7x7)', requiredCount: 6, affectsKPI: true },
+  { roleName: 'Cargador de Tiros (7x7)', requiredCount: 8, affectsKPI: true },
+  { roleName: 'Encargado de Patio (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Tecnico en Mantenimiento (7x7)', requiredCount: 4, affectsKPI: true },
+  { roleName: 'Administrativo (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Ingeniero de tronadura (7x7)', requiredCount: 2, affectsKPI: true },
+  { roleName: 'Asistencia Tecnica (7x7)', requiredCount: 2, affectsKPI: true }
 ];
 
 const generateId = () => Math.random().toString(36).substr(2, 9).toUpperCase();
@@ -276,7 +277,8 @@ export const dbService = {
     if (!roleErr && roleData) {
       const mapped: ContractRole[] = roleData.map((row: any) => ({
         roleName: row.role_name,
-        requiredCount: row.required_count
+        requiredCount: row.required_count,
+        affectsKPI: row.affects_kpi !== undefined ? row.affects_kpi : true
       }));
       localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(mapped));
     }
@@ -651,10 +653,15 @@ export const dbService = {
   async saveContractRoles(roles: ContractRole[]): Promise<void> {
     localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(roles));
     if (supabase) {
-      const { error } = await supabase.from('contract_roles').upsert(
+      // Clean table first to support role deletion
+      const { error: delErr } = await supabase.from('contract_roles').delete().neq('role_name', 'dummy_val_deleted_filter');
+      if (delErr) throw delErr;
+
+      const { error } = await supabase.from('contract_roles').insert(
         roles.map(r => ({
           role_name: r.roleName,
-          required_count: r.requiredCount
+          required_count: r.requiredCount,
+          affects_kpi: r.affectsKPI ?? true
         }))
       );
       if (error) throw error;

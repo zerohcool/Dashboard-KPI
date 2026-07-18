@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { dbService } from '../services/db';
 import type { ContractSettings, Equipment, ContractKPI, ContractRole } from '../services/db';
 import { getPluralType } from '../utils/calculations';
-import { Save, AlertCircle, ShieldCheck, Users, Percent } from 'lucide-react';
+import { Save, AlertCircle, ShieldCheck, Users, Percent, X } from 'lucide-react';
 
 interface ContractConfigViewProps {
   fleet: Equipment[];
@@ -21,11 +21,43 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
   const [kpis, setKpis] = useState<ContractKPI[]>([]);
   const [roles, setRoles] = useState<ContractRole[]>([]);
 
+  // Add custom role form states
+  const [newRoleName, setNewRoleName] = useState('');
+  const [newRoleCount, setNewRoleCount] = useState(1);
+  const [newRoleAffects, setNewRoleAffects] = useState(true);
+
   useEffect(() => {
     setSettings(dbService.getContractSettings());
     setKpis(dbService.getContractKPIs());
     setRoles(dbService.getContractRoles());
   }, []);
+
+  const handleAddRole = (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (!newRoleName.trim()) {
+      addToast('El nombre del cargo no puede estar vacío.', 'error');
+      return;
+    }
+    if (roles.some(r => r.roleName.toLowerCase() === newRoleName.trim().toLowerCase())) {
+      addToast('Este cargo ya existe.', 'error');
+      return;
+    }
+    const newRole: ContractRole = {
+      roleName: newRoleName.trim(),
+      requiredCount: newRoleCount,
+      affectsKPI: newRoleAffects
+    };
+    setRoles(prev => [...prev, newRole]);
+    setNewRoleName('');
+    setNewRoleCount(1);
+    setNewRoleAffects(true);
+    addToast('Cargo agregado. Guarde la configuración general para persistir.', 'success');
+  };
+
+  const handleDeleteRole = (roleName: string) => {
+    setRoles(prev => prev.filter(r => r.roleName !== roleName));
+    addToast('Cargo eliminado. Guarde la configuración general para persistir.', 'success');
+  };
 
   const handleSave = (e: React.FormEvent) => {
     e.preventDefault();
@@ -253,33 +285,144 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
         {/* Section 3: Roles and Headcounts */}
         <div className="glass table-card" style={{ marginBottom: '24px' }}>
           <h2 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <Users size={20} className="text-secondary" /> Dotación Teórica Comprometida por Contrato
+            <Users size={20} className="text-secondary" /> Dotación de Personal Operativo
           </h2>
           <p style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '-8px' }}>
-            Defina la cantidad diaria de personal requerido para cada cargo de la dotación contratada.
+            Defina y gestione la dotación del personal. Los cargos marcados como "Afecta KPI" serán evaluados para el cumplimiento del contrato. Los cargos extras no afectarán la nota final.
           </p>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
+
+          {/* Form to Add New Role */}
+          <div style={{ 
+            background: 'rgba(0,0,0,0.02)', 
+            padding: '16px', 
+            borderRadius: '12px', 
+            marginBottom: '24px', 
+            border: '1px dashed var(--border-color)', 
+            display: 'flex', 
+            gap: '16px', 
+            alignItems: 'flex-end', 
+            flexWrap: 'wrap' 
+          }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1, minWidth: '200px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Nombre del Cargo / Turno</label>
+              <input 
+                type="text" 
+                placeholder="ej. Cargador Extra Enaex (7x7) o Supervisor (4x3)" 
+                value={newRoleName}
+                onChange={(e) => setNewRoleName(e.target.value)}
+                style={{ padding: '8px', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', width: '100px' }}>
+              <label style={{ fontSize: '0.8rem', fontWeight: 'bold', color: 'var(--text-secondary)' }}>Dotación</label>
+              <input 
+                type="number" 
+                min="0"
+                value={newRoleCount}
+                onChange={(e) => setNewRoleCount(parseInt(e.target.value) || 0)}
+                style={{ padding: '8px', textAlign: 'center', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '38px', userSelect: 'none' }}>
+              <input 
+                type="checkbox" 
+                id="affects-kpi-chk"
+                checked={newRoleAffects}
+                onChange={(e) => setNewRoleAffects(e.target.checked)}
+                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+              />
+              <label htmlFor="affects-kpi-chk" style={{ fontSize: '0.85rem', cursor: 'pointer', fontWeight: '600', color: 'var(--text-primary)' }}>Afecta KPI</label>
+            </div>
+            <button className="btn btn-secondary" onClick={handleAddRole} style={{ height: '38px', padding: '0 16px' }}>
+              Agregar Cargo
+            </button>
+          </div>
+
+          {/* List of Roles */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: '16px' }}>
             {roles.map(r => (
               <div 
                 key={r.roleName} 
                 style={{ 
                   display: 'flex', 
-                  alignItems: 'center', 
-                  justifyContent: 'space-between', 
-                  padding: '10px 14px', 
+                  flexDirection: 'column',
+                  gap: '8px', 
+                  padding: '12px 14px', 
                   background: 'rgba(0,0,0,0.01)', 
                   border: '1px solid var(--border-color)', 
                   borderRadius: '10px' 
                 }}
               >
-                <span style={{ fontSize: '0.85rem', fontWeight: '500', color: 'var(--text-primary)' }}>{r.roleName}</span>
-                <input
-                  type="number"
-                  min="0"
-                  value={r.requiredCount}
-                  onChange={(e) => handleRoleChange(r.roleName, parseInt(e.target.value) || 0)}
-                  style={{ width: '70px', textAlign: 'center', padding: '4px' }}
-                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <input
+                    type="text"
+                    value={r.roleName}
+                    onChange={(e) => {
+                      const newName = e.target.value;
+                      setRoles(prev => prev.map(item => item.roleName === r.roleName ? { ...item, roleName: newName } : item));
+                    }}
+                    style={{ 
+                      fontSize: '0.85rem', 
+                      fontWeight: '600', 
+                      border: 'none', 
+                      background: 'transparent',
+                      flex: 1,
+                      marginRight: '8px',
+                      color: 'var(--text-primary)',
+                      borderBottom: '1px solid transparent'
+                    }}
+                    onFocus={(e) => e.target.style.borderBottom = '1px solid var(--primary-light)'}
+                    onBlur={(e) => e.target.style.borderBottom = '1px solid transparent'}
+                  />
+                  <button 
+                    type="button"
+                    onClick={() => handleDeleteRole(r.roleName)}
+                    style={{ 
+                      background: 'none', 
+                      border: 'none', 
+                      color: 'var(--color-mantencioncorrectiva)', 
+                      cursor: 'pointer',
+                      padding: '4px',
+                      display: 'flex',
+                      alignItems: 'center'
+                    }}
+                    title="Eliminar cargo"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id={`chk-${r.roleName.replace(/\s+/g, '-')}`}
+                      checked={r.affectsKPI ?? true}
+                      onChange={(e) => {
+                        const newVal = e.target.checked;
+                        setRoles(prev => prev.map(item => item.roleName === r.roleName ? { ...item, affectsKPI: newVal } : item));
+                      }}
+                      style={{ cursor: 'pointer', width: '16px', height: '16px' }}
+                    />
+                    <label 
+                      htmlFor={`chk-${r.roleName.replace(/\s+/g, '-')}`} 
+                      style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', cursor: 'pointer', fontWeight: '500' }}
+                    >
+                      Afecta KPI
+                    </label>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>Requerido:</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={r.requiredCount}
+                      onChange={(e) => handleRoleChange(r.roleName, parseInt(e.target.value) || 0)}
+                      style={{ width: '60px', textAlign: 'center', padding: '4px', border: '1px solid var(--border-color)', borderRadius: '6px' }}
+                    />
+                  </div>
+                </div>
               </div>
             ))}
           </div>

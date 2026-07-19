@@ -5,6 +5,30 @@ import type {
 } from '../services/db';
 import { getWednesdayStartDate, getRoleShiftType } from '../services/db';
 
+export const calculateQualityKPICompliance = (kpiId: string, realValue: number): number => {
+  if (kpiId === 'kpi-tiros-quedados') {
+    return realValue === 0 ? 100.0 : 0.0;
+  }
+  if (kpiId === 'kpi-ptq') {
+    if (realValue <= 3) return 100.0;
+    if (realValue === 4) return 75.0;
+    return 0.0;
+  }
+  if (kpiId === 'kpi-flyrock') {
+    return realValue === 0 ? 100.0 : 0.0;
+  }
+  if (kpiId === 'kpi-vod') {
+    if (realValue >= 8) return 100.0;
+    if (realValue >= 6) return 75.0;
+    if (realValue >= 4) return 50.0;
+    return 0.0;
+  }
+  if (kpiId === 'kpi-gases') {
+    return realValue <= 1 ? 100.0 : 0.0;
+  }
+  return Math.min(100, Math.max(0, realValue));
+};
+
 export const getPluralType = (type: string): string => {
   switch (type) {
     case 'Camión Fábrica': return 'Camiones Fábrica';
@@ -329,9 +353,18 @@ export const calculateMetrics = (
   qualityKpis.forEach(k => {
     const pRecord = periodCompliances.find(p => p.kpiId === k.id);
     if (pRecord) {
-      qualityCompliancesMap[k.id] = pRecord.compliancePct;
+      if (['kpi-tiros-quedados', 'kpi-ptq', 'kpi-flyrock', 'kpi-vod', 'kpi-gases'].includes(k.id)) {
+        qualityCompliancesMap[k.id] = calculateQualityKPICompliance(k.id, pRecord.realValue);
+      } else {
+        qualityCompliancesMap[k.id] = pRecord.compliancePct;
+      }
     } else {
-      qualityCompliancesMap[k.id] = 100.0; // default 100% compliance
+      if (k.id === 'kpi-tiros-quedados') qualityCompliancesMap[k.id] = 100.0;
+      else if (k.id === 'kpi-ptq') qualityCompliancesMap[k.id] = 100.0;
+      else if (k.id === 'kpi-flyrock') qualityCompliancesMap[k.id] = 100.0;
+      else if (k.id === 'kpi-vod') qualityCompliancesMap[k.id] = 100.0;
+      else if (k.id === 'kpi-gases') qualityCompliancesMap[k.id] = 100.0;
+      else qualityCompliancesMap[k.id] = 100.0; // default 100% compliance
     }
   });
 

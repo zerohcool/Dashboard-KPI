@@ -94,7 +94,7 @@ const DEFAULT_SETTINGS: ContractSettings = {
 
 // Seed KPIs list with 5 new safety KPIs (sum of safety is 10%)
 const DEFAULT_CONTRACT_KPIS: ContractKPI[] = [
-  // Disponibilidad e Insumos (31%)
+  // Disponibilidad e Materias Primas (31%)
   { id: 'kpi-camiones', category: 'disponibilidad', name: 'Disponibilidad de Camiones Fabrica', weight: 10, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-cargadores', category: 'disponibilidad', name: 'Disponibilidad de Cargador frontales (Tapapozos)', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },
   { id: 'kpi-polvorines', category: 'disponibilidad', name: 'Disponibilidad de Polvorines Móviles', weight: 8, unit: '%', periodicity: 'diario', minVal: '85%', expectedVal: '90%', maxVal: '95%' },

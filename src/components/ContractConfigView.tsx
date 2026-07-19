@@ -626,8 +626,9 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
                         {hoveredKpiId === k.id && tooltipData && (
                           <div className="glass" style={{
                             position: 'absolute',
-                            left: '10px',
-                            top: '34px',
+                            left: '100%',
+                            top: '0',
+                            marginLeft: '12px',
                             width: '340px',
                             background: 'var(--bg-card)',
                             border: '1px solid var(--border-color)',

@@ -2,7 +2,7 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { dbService, getWednesdayStartDate, getRoleShiftType } from '../services/db';
 import type { Equipment, PeriodCompliance, AvailabilityRecord } from '../services/db';
 import { 
-  calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours 
+  calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours, calculateQualityKPICompliance 
 } from '../utils/calculations';
 import { 
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -13,6 +13,29 @@ import {
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+
+const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> = {
+  'kpi-seg-trirf': {
+    title: 'Incidentes que afectan al TRIRF (Accidentes de alto potencial / Incidentes Alto impacto)',
+    desc: 'Fatal(FI) - Tiempo Perdido (LTI) - Tratamiento medico (MTI) - Trabajo Restringido (RWI) - Alto Potencial - Alto Impacto.'
+  },
+  'kpi-seg-notrirf': {
+    title: 'Incidentes que no afectan al TRIRF',
+    desc: 'Accidentes STP (FA) - Daños a equipos - Fallas Operacionales - Impactos Ambientales Significativos.'
+  },
+  'kpi-seg-legal': {
+    title: 'Cumplimiento legal (fiscalizaciones estatales)',
+    desc: 'Hallazgos o sumarios de Sernageomin, Ministerio de Salud, Dirección del trabajo, SUCESO, SMA u otro organismo gubernamental, así como también de los Organismo administrador de la Ley.'
+  },
+  'kpi-seg-auditorias': {
+    title: 'Auditorías Internas',
+    desc: 'Evaluaciones bajo lo esperado de auditorías que realice SGSCM de manera Interna o Externa.'
+  },
+  'kpi-seg-incumplimiento': {
+    title: 'Incumplimiento de temas generales de salud, seguridad y medio ambiente',
+    desc: 'No cumplimiento de los Planes y Programas informados a la compañía.\n• No entrega de estadística E-200.\n• No entregar los Avances y Control de Programas SSMA Empresas contratistas / SG-GSSM-FOR-010.\n• No participar en actividades relevantes de salud, seguridad y medio ambiente de la compañía: reuniones Cero Daño, Campañas de seguridad, CPHS de faena, DPRF, etc.'
+  }
+};
 
 interface DashboardViewProps {
   fleet: Equipment[];
@@ -50,7 +73,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const [exportingPDF, setExportingPDF] = useState(false);
   const [modalEqId, setModalEqId] = useState<string | null>(null);
   const [selectedRoleForModal, setSelectedRoleForModal] = useState<string | null>(null);
+  const [hoveredKpiId, setHoveredKpiId] = useState<string | null>(null);
   
+  const getQualityKPIState = (kpiId: string) => {
+    if (periodCompliancesState[kpiId]) {
+      return periodCompliancesState[kpiId];
+    }
+    // Default fallbacks (Phase 23)
+    if (kpiId === 'kpi-tiros-quedados') return { realValue: 0, compliancePct: 100.0 };
+    if (kpiId === 'kpi-ptq') return { realValue: 3, compliancePct: 100.0 };
+    if (kpiId === 'kpi-flyrock') return { realValue: 0, compliancePct: 100.0 };
+    if (kpiId === 'kpi-vod') return { realValue: 8, compliancePct: 100.0 };
+    if (kpiId === 'kpi-gases') return { realValue: 0, compliancePct: 100.0 };
+    return { realValue: 100.0, compliancePct: 100.0 };
+  };
+
   // Dashboard Tabs (Phase 18: overview, raw_materials, attendance, kpi)
   const [activeTab, setActiveTab] = useState<'overview' | 'raw_materials' | 'attendance' | 'kpi'>('overview');
 
@@ -1146,11 +1183,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                   />
                   <Legend verticalAlign="top" height={36} />
                   <ReferenceLine 
+                    y={170} 
+                    stroke="rgba(239, 68, 68, 0.4)" 
+                    strokeWidth={1.5} 
+                    strokeDasharray="3 3" 
+                    label={{ value: 'Mínimo (170 ton)', fill: 'rgba(239, 68, 68, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
+                  />
+                  <ReferenceLine 
                     y={200} 
-                    stroke="#ef4444" 
-                    strokeWidth={2} 
-                    strokeDasharray="4 4" 
-                    label={{ value: 'Mínimo Contrato (200 ton)', fill: '#ef4444', fontSize: 10, position: 'top', fontWeight: 'bold' }} 
+                    stroke="rgba(59, 130, 246, 0.4)" 
+                    strokeWidth={1.5} 
+                    strokeDasharray="3 3" 
+                    label={{ value: 'Esperado / Máximo (200 ton)', fill: 'rgba(59, 130, 246, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
                   />
                   <Area 
                     type="monotone" 
@@ -1185,7 +1229,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     <th style={{ textAlign: 'center' }}>Matriz Stock</th>
                     <th style={{ textAlign: 'center' }}>Cumplimiento Nitrato</th>
                     <th style={{ textAlign: 'center' }}>Cumplimiento Matriz</th>
-                    <th>Estado de Insumos</th>
+                    <th>Estado de Materias Primas</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -1528,15 +1572,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
-                    <th style={{ width: '150px', textAlign: 'center' }}>% Valor Real</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '120px', textAlign: 'center' }}>% Valor Real</th>
                     <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
                   </tr>
                 </thead>
                 <tbody>
                   {kpis.filter(k => k.category === 'calidad').map(k => {
-                    const realVal = periodCompliancesState[k.id]?.realValue ?? 100.0;
-                    const compPct = periodCompliancesState[k.id]?.compliancePct ?? 100.0;
+                    const stateVal = getQualityKPIState(k.id);
+                    const realVal = stateVal.realValue;
+                    const compPct = stateVal.compliancePct;
                     const weightedVal = (k.weight * compPct) / 100;
+                    const isEventUnitBased = ['kpi-tiros-quedados', 'kpi-ptq', 'kpi-flyrock', 'kpi-vod', 'kpi-gases'].includes(k.id);
 
                     return (
                       <tr key={k.id}>
@@ -1551,19 +1598,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                             <input
                               type="number"
                               min="0"
-                              max="100"
+                              max={isEventUnitBased ? undefined : 100}
                               value={realVal}
                               onChange={(e) => {
                                 const newVal = parseFloat(e.target.value) || 0;
+                                const comp = isEventUnitBased ? calculateQualityKPICompliance(k.id, newVal) : newVal;
                                 setPeriodCompliancesState(prev => ({
                                   ...prev,
-                                  [k.id]: { realValue: newVal, compliancePct: newVal }
+                                  [k.id]: { realValue: newVal, compliancePct: comp }
                                 }));
                               }}
-                              style={{ width: '75px', padding: '4px', textAlign: 'center', fontWeight: 'bold' }}
+                              style={{ width: '75px', padding: '4px', textAlign: 'center', fontWeight: 'bold', border: '1px solid var(--border-color)', borderRadius: '6px' }}
                             />
-                            <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>%</span>
+                            <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)' }}>
+                              {k.unit === '%' ? '%' : ''}
+                            </span>
                           </div>
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                          {compPct.toFixed(1)}%
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
@@ -1646,7 +1699,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
 
                     return (
                       <tr key={k.id}>
-                        <td style={{ fontWeight: '600' }}>{k.name}</td>
+                        <td 
+                          style={{ fontWeight: '600', position: 'relative' }}
+                          onMouseEnter={() => setHoveredKpiId(k.id)}
+                          onMouseLeave={() => setHoveredKpiId(null)}
+                        >
+                          <span style={{ borderBottom: '1px dotted var(--primary)', cursor: 'help' }}>
+                            {k.name}
+                          </span>
+                          {hoveredKpiId === k.id && SAFETY_KPI_DESCRIPTIONS[k.id] && (
+                            <div className="glass" style={{
+                              position: 'absolute',
+                              left: '100%',
+                              top: '0',
+                              marginLeft: '12px',
+                              width: '340px',
+                              background: 'var(--bg-card)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '8px',
+                              boxShadow: 'var(--shadow-xl)',
+                              padding: '12px',
+                              zIndex: 100,
+                              pointerEvents: 'none',
+                              textAlign: 'left'
+                            }}>
+                              <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)' }}>
+                                {SAFETY_KPI_DESCRIPTIONS[k.id].title}
+                              </h4>
+                              <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: '1.4', color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>
+                                {SAFETY_KPI_DESCRIPTIONS[k.id].desc}
+                              </p>
+                            </div>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center' }}>{k.weight}%</td>
                         <td style={{ textAlign: 'center' }}>{k.unit}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '500' }}>

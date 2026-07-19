@@ -112,7 +112,7 @@ export const MethodologyView: React.FC = () => {
               <ul style={{ margin: 0, paddingLeft: '20px', fontSize: '0.85rem' }}>
                 <li><strong>Exclusión de Cargos Planta:</strong> Los cargos extras costeados por Enaex que tienen desactivado "Afecta KPI" se omiten de toda la estadística.</li>
                 <li><strong>Personal en Roster 4x3:</strong> Solo laboran de lunes a jueves. Los viernes, sábados y domingos se excluyen automáticamente de los requerimientos y asistencias diarias del cálculo.</li>
-                <li><strong>Personal en Roster 7x7:</strong> Se divide su dotación teórica entre 2, considerando solo la cohorte activa en turno diario.</li>
+                <li><strong>Personal en Roster 7x7:</strong> Se divide su dotación teórica entre 2, considerando solo el grupo activo en turno diario.</li>
                 <li>
                   <strong>Fórmula de Asistencia:</strong>
                   <code style={{ display: 'block', background: 'rgba(0,0,0,0.03)', padding: '6px', borderRadius: '4px', marginTop: '4px', fontFamily: 'monospace' }}>

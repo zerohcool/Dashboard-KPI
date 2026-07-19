@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react';
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { dbService, getWednesdayStartDate, getRoleShiftType } from '../services/db';
 import type { Equipment, PeriodCompliance, AvailabilityRecord } from '../services/db';
 import { 
@@ -96,6 +96,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil']
   );
 
+  const [edpAmount, setEdpAmount] = useState<number>(20000000);
+
+  const getEDPMultiplier = useCallback((mdc: number): { multiplier: number; range: string; discount: number } => {
+    if (mdc >= 100.0) {
+      return { multiplier: 100, range: 'MDC ≥ 100%', discount: 0 };
+    } else if (mdc >= 96.0) {
+      return { multiplier: 98, range: '96% ≤ MDC < 100%', discount: 2 };
+    } else if (mdc >= 87.0) {
+      return { multiplier: 96, range: '87% ≤ MDC < 96%', discount: 4 };
+    } else if (mdc >= 77.0) {
+      return { multiplier: 94, range: '77% ≤ MDC < 87%', discount: 6 };
+    } else if (mdc >= 67.0) {
+      return { multiplier: 92, range: '67% ≤ MDC < 77%', discount: 8 };
+    } else {
+      return { multiplier: 90, range: '0% ≤ MDC < 67%', discount: 10 };
+    }
+  }, []);
+
   const dashboardRef = useRef<HTMLDivElement>(null);
 
   // Fetch contract settings & availability records for range
@@ -117,6 +135,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const minStock = useMemo(() => {
     const k = kpis.find(item => item.id === 'kpi-insumos');
     return k ? parseFloat(k.minVal) || 170 : 170;
+  }, [kpis]);
+
+  const maxStock = useMemo(() => {
+    const k = kpis.find(item => item.id === 'kpi-insumos');
+    return k ? parseFloat(k.maxVal) || 200 : 200;
   }, [kpis]);
 
   // Period compliance editing state (Phase 17: edited directly in Dashboard)
@@ -1204,7 +1227,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     stroke="rgba(59, 130, 246, 0.4)" 
                     strokeWidth={1.5} 
                     strokeDasharray="3 3" 
-                    label={{ value: `Esperado / Máximo (${targetStock} ton)`, fill: 'rgba(59, 130, 246, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
+                    label={{ value: `Esperado (${targetStock} ton)`, fill: 'rgba(59, 130, 246, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
+                  />
+                  <ReferenceLine 
+                    y={maxStock} 
+                    stroke="rgba(16, 185, 129, 0.4)" 
+                    strokeWidth={1.5} 
+                    strokeDasharray="3 3" 
+                    label={{ value: `Máximo (${maxStock} ton)`, fill: 'rgba(16, 185, 129, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
                   />
                   <Area 
                     type="monotone" 
@@ -1505,6 +1535,143 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               </div>
             </div>
           </div>
+
+          {(() => {
+            const edpResult = getEDPMultiplier(metrics.weightedScore);
+            const finalPayment = (edpAmount * edpResult.multiplier) / 100;
+            const discountValue = edpAmount - finalPayment;
+
+            return (
+              <div className="glass table-card" style={{ padding: '24px', marginBottom: '24px' }}>
+                <h3 style={{ fontSize: '1rem', fontWeight: '700', color: 'var(--primary)', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span>Multiplicador de Estado de Pago (EDP) según MDC</span>
+                </h3>
+                
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px' }}>
+                  {/* Left Column: Result & Calculator */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', borderRight: '1px solid var(--border-color)', paddingRight: '24px' }}>
+                    <div style={{ background: 'var(--primary-glow)', padding: '16px', borderRadius: '12px', border: '1px solid var(--primary-light)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase' }}>Rango MDC Activo</span>
+                        <h4 style={{ margin: '4px 0 0 0', color: 'var(--primary-light)', fontSize: '1.2rem', fontWeight: '700' }}>{edpResult.range}</h4>
+                      </div>
+                      <div style={{ textAlign: 'right' }}>
+                        <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: '700', textTransform: 'uppercase' }}>Multiplicador / Descuento</span>
+                        <h4 style={{ margin: '4px 0 0 0', color: 'var(--text-primary)', fontSize: '1.2rem', fontWeight: '700' }}>
+                          {edpResult.multiplier}% / -{edpResult.discount}%
+                        </h4>
+                      </div>
+                    </div>
+
+                    {/* Simulation calculator */}
+                    <div>
+                      <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: '700' }}>Simulador de Facturación</h4>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                        <div>
+                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Monto Estado de Pago Mensual (CLP)</label>
+                          <div style={{ display: 'flex', gap: '8px' }}>
+                            <input 
+                              type="number" 
+                              value={edpAmount} 
+                              onChange={(e) => setEdpAmount(parseFloat(e.target.value) || 0)}
+                              style={{ 
+                                flex: 1,
+                                padding: '8px 12px', 
+                                borderRadius: '8px', 
+                                border: '1px solid var(--border-color)', 
+                                background: 'var(--bg-input)', 
+                                color: 'var(--text-input)',
+                                fontSize: '0.9rem' 
+                              }} 
+                            />
+                            <button 
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => setEdpAmount(20000000)}
+                              style={{ padding: '0 12px' }}
+                            >
+                              Ejemplo 20M
+                            </button>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '4px' }}>
+                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Total a Pagar ({edpResult.multiplier}%)</span>
+                            <strong style={{ fontSize: '1.05rem', color: 'var(--color-operativo)' }}>
+                              ${Math.round(finalPayment).toLocaleString('es-CL')}
+                            </strong>
+                          </div>
+                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                            <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Descuento ({edpResult.discount}%)</span>
+                            <strong style={{ fontSize: '1.05rem', color: edpResult.discount > 0 ? 'var(--color-mantencioncorrectiva)' : 'var(--text-secondary)' }}>
+                              ${Math.round(discountValue).toLocaleString('es-CL')}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column: Reference Table */}
+                  <div>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '0.9rem', fontWeight: '700' }}>Tabla del Multiplicador Contractual</h4>
+                    <div className="table-wrapper">
+                      <table style={{ fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr>
+                            <th>Rango MDC</th>
+                            <th style={{ textAlign: 'center' }}>Multiplicador</th>
+                            <th style={{ textAlign: 'center' }}>Descuento</th>
+                            <th style={{ textAlign: 'center' }}>Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[
+                            { min: 100, max: null, mult: 100, disc: 0, range: 'MDC ≥ 100%' },
+                            { min: 96, max: 100, mult: 98, disc: 2, range: '96% ≤ MDC < 100%' },
+                            { min: 87, max: 96, mult: 96, disc: 4, range: '87% ≤ MDC < 96%' },
+                            { min: 77, max: 87, mult: 94, disc: 6, range: '77% ≤ MDC < 87%' },
+                            { min: 67, max: 77, mult: 92, disc: 8, range: '67% ≤ MDC < 77%' },
+                            { min: 0, max: 67, mult: 90, disc: 10, range: '0% ≤ MDC < 67%' },
+                          ].map((row, idx) => {
+                            const score = metrics.weightedScore;
+                            const isActiveRange = 
+                              row.max === null 
+                                ? score >= row.min 
+                                : (score >= row.min && score < row.max);
+
+                            return (
+                              <tr 
+                                key={idx} 
+                                style={{ 
+                                  background: isActiveRange ? 'var(--primary-glow)' : 'transparent',
+                                  fontWeight: isActiveRange ? '700' : 'normal',
+                                  borderLeft: isActiveRange ? '4px solid var(--primary)' : '4px solid transparent'
+                                }}
+                              >
+                                <td>{row.range}</td>
+                                <td style={{ textAlign: 'center', color: isActiveRange ? 'var(--primary-light)' : 'inherit' }}>{row.mult}%</td>
+                                <td style={{ textAlign: 'center', color: row.disc > 0 ? 'var(--color-mantencioncorrectiva)' : 'var(--text-muted)' }}>
+                                  {row.disc > 0 ? `-${row.disc}%` : '0%'}
+                                </td>
+                                <td style={{ textAlign: 'center' }}>
+                                  {isActiveRange ? (
+                                    <span className="badge badge-operativo" style={{ fontSize: '0.65rem', padding: '2px 6px' }}>Activo</span>
+                                  ) : (
+                                    <span style={{ opacity: 0.3 }}>-</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* TABLE 1: DISPONIBILIDAD Y MATERIAS PRIMAS */}
           <div className="glass table-card" style={{ marginBottom: '24px' }}>

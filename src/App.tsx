@@ -4,6 +4,7 @@ import { DashboardView } from './components/DashboardView';
 import { DailyLogView } from './components/DailyLogView';
 import { FleetView } from './components/FleetView';
 import { ContractConfigView } from './components/ContractConfigView';
+import { MethodologyView } from './components/MethodologyView';
 import { ToastContainer } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
 import { dbService } from './services/db';
@@ -77,6 +78,8 @@ function App() {
             addToast={addToast}
           />
         );
+      case 'methodology':
+        return <MethodologyView />;
       default:
         return <DashboardView fleet={fleet} addToast={addToast} />;
     }

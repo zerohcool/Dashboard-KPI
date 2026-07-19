@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { dbService, getWednesdayStartDate, getRoleShiftType } from '../services/db';
-import type { Equipment, PeriodCompliance, AvailabilityRecord } from '../services/db';
+import type { Equipment, PeriodCompliance, AvailabilityRecord, ContractUser } from '../services/db';
 import { 
   calculateMetrics, exportToCSV, getPluralType, calculateTypeDailyHours, calculateQualityKPICompliance 
 } from '../utils/calculations';
@@ -40,6 +40,7 @@ const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> =
 interface DashboardViewProps {
   fleet: Equipment[];
   addToast: (text: string, type: 'success' | 'error') => void;
+  currentUser: ContractUser;
 }
 
 const getStatusClass = (status: string) => {
@@ -58,7 +59,7 @@ const formatToDDMMYYYY = (dateStr: string) => {
   return dateStr;
 };
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, currentUser }) => {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   
   // Set default range to last 14 days
@@ -1458,10 +1459,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                 <h3 style={{ fontSize: '1rem', fontWeight: '700', margin: 0 }}>Desempeño de Sub-Evaluaciones Contractuales</h3>
                 
                 {/* Save button for inline edits */}
-                <button className="btn btn-primary btn-sm" onClick={handleSavePeriodKPIs} style={{ height: '36px' }}>
-                  <Save size={14} />
-                  <span>Guardar Calidad y Seguridad</span>
-                </button>
+                {currentUser.role === 'Administrador' && (
+                  <button className="btn btn-primary btn-sm" onClick={handleSavePeriodKPIs} style={{ height: '36px' }}>
+                    <Save size={14} />
+                    <span>Guardar Calidad y Seguridad</span>
+                  </button>
+                )}
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1777,6 +1780,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                               min="0"
                               max={isEventUnitBased ? undefined : 100}
                               value={realVal}
+                              disabled={currentUser.role === 'Usuario'}
                               onChange={(e) => {
                                 const newVal = parseFloat(e.target.value) || 0;
                                 const comp = isEventUnitBased ? calculateQualityKPICompliance(k.id, newVal) : newVal;
@@ -1926,6 +1930,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                                 min="0"
                                 max="100"
                                 value={realVal}
+                                disabled={currentUser.role === 'Usuario'}
                                 onChange={(e) => {
                                   const newVal = parseFloat(e.target.value) || 0;
                                   let comp = 100.0;
@@ -1949,6 +1954,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                                 type="number"
                                 min="0"
                                 value={realVal}
+                                disabled={currentUser.role === 'Usuario'}
                                 onChange={(e) => {
                                   const newVal = parseInt(e.target.value) || 0;
                                   let comp = 100.0;

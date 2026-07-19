@@ -73,6 +73,15 @@ export interface PeriodCompliance {
   compliancePct: number;
 }
 
+export interface ContractUser {
+  id: string;
+  username: string;
+  password?: string;
+  name: string;
+  email: string;
+  role: 'Administrador' | 'Usuario';
+}
+
 const STORAGE_KEYS = {
   EQUIPMENT: 'disponibilidad_equipos_fleet',
   SETTINGS: 'disponibilidad_equipos_settings',
@@ -82,7 +91,8 @@ const STORAGE_KEYS = {
   QUALITY_COMPLIANCE: 'disponibilidad_equipos_quality_compliance',
   CONTRACT_ROLES: 'disponibilidad_equipos_contract_roles',
   WEEKLY_ATTENDANCE: 'disponibilidad_equipos_weekly_attendance',
-  PERIOD_COMPLIANCE: 'disponibilidad_equipos_period_compliance'
+  PERIOD_COMPLIANCE: 'disponibilidad_equipos_period_compliance',
+  USERS: 'disponibilidad_equipos_users'
 };
 
 const DEFAULT_SETTINGS: ContractSettings = {
@@ -304,6 +314,20 @@ export const dbService = {
         compliancePct: parseFloat(row.compliance_pct)
       }));
       localStorage.setItem(STORAGE_KEYS.PERIOD_COMPLIANCE, JSON.stringify(mapped));
+    }
+
+    // 11. Fetch users
+    const { data: userData, error: userErr } = await supabase.from('users').select('*');
+    if (!userErr && userData) {
+      const mapped: ContractUser[] = userData.map((row: any) => ({
+        id: row.id,
+        username: row.username,
+        password: row.password,
+        name: row.name,
+        email: row.email,
+        role: row.role as ContractUser['role']
+      }));
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(mapped));
     }
   },
 
@@ -876,5 +900,85 @@ export const dbService = {
     }
 
     localStorage.setItem(STORAGE_KEYS.RECORDS, JSON.stringify(historyRecords));
+  },
+
+  getUsers(): ContractUser[] {
+    const data = localStorage.getItem(STORAGE_KEYS.USERS);
+    if (!data) {
+      const initialUsers: ContractUser[] = [
+        {
+          id: 'admin-andres',
+          username: 'andres.alquinta',
+          password: '123456',
+          name: 'Andres Alquinta Ayala',
+          email: 'andres.alquinta@enaex.com',
+          role: 'Administrador'
+        },
+        {
+          id: 'admin-felipe',
+          username: 'felipe.gonzalez',
+          password: '123456',
+          name: 'Felipe Gonzalez Bastias',
+          email: 'felipe.gonzalez@enaex.com',
+          role: 'Administrador'
+        }
+      ];
+      localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(initialUsers));
+      if (supabase) {
+        supabase.from('users').insert(
+          initialUsers.map(u => ({
+            id: u.id,
+            username: u.username,
+            password: u.password,
+            name: u.name,
+            email: u.email,
+            role: u.role
+          }))
+        ).then(({ error }) => {
+          if (error) console.error('Error seeding initial users to Supabase:', error);
+        });
+      }
+      return initialUsers;
+    }
+    return JSON.parse(data);
+  },
+
+  async saveUser(user: ContractUser): Promise<void> {
+    const users = this.getUsers();
+    const idx = users.findIndex(u => u.id === user.id);
+    if (idx >= 0) {
+      users[idx] = user;
+    } else {
+      users.push(user);
+    }
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+
+    if (supabase) {
+      const { error } = await supabase.from('users').upsert({
+        id: user.id,
+        username: user.username,
+        password: user.password,
+        name: user.name,
+        email: user.email,
+        role: user.role
+      });
+      if (error) throw error;
+    }
+  },
+
+  async deleteUser(userId: string): Promise<void> {
+    const users = this.getUsers().filter(u => u.id !== userId);
+    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(users));
+
+    if (supabase) {
+      const { error } = await supabase.from('users').delete().eq('id', userId);
+      if (error) throw error;
+    }
+  },
+
+  authenticate(username: string, passwordHash: string): ContractUser | null {
+    const users = this.getUsers();
+    const found = users.find(u => u.username.toLowerCase() === username.toLowerCase() && u.password === passwordHash);
+    return found || null;
   }
 };

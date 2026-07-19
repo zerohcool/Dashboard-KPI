@@ -68,7 +68,7 @@ export const MethodologyView: React.FC = () => {
                 <div>
                   <strong>Cumplimiento de Materias Primas:</strong> Promedio del stock de Nitrato y Matriz respecto a la meta esperada ({getKpiExpected('kpi-insumos')} ton), topado al 100%:
                   <code style={{ display: 'block', background: 'rgba(0,0,0,0.03)', padding: '6px', borderRadius: '4px', marginTop: '4px', fontFamily: 'monospace' }}>
-                    Cumplimiento Diario = (Min(100, (Stock Real Nitrato / 200) * 100) + Min(100, (Stock Real Matriz / 200) * 100)) / 2
+                    Cumplimiento Diario = (Min(100, (Stock Real Nitrato / {getKpiExpected('kpi-insumos')}) * 100) + Min(100, (Stock Real Matriz / {getKpiExpected('kpi-insumos')}) * 100)) / 2
                   </code>
                 </div>
               </div>

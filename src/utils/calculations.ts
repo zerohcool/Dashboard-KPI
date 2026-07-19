@@ -335,12 +335,15 @@ export const calculateMetrics = (
   let rawMaterialsCompliance = 100.0;
   if (startDate && endDate && dates.length > 0) {
     let dayCompSum = 0;
+    const insumosKpi = kpis.find(k => k.id === 'kpi-insumos');
+    const targetStock = insumosKpi ? parseFloat(insumosKpi.expectedVal) || 200 : 200;
+
     dates.forEach(dateStr => {
       const row = rawMaterials.find(rm => rm.date === dateStr);
-      const nitrato = row ? row.nitratoStock : 200;
-      const matriz = row ? row.matrizStock : 200;
-      const nitratoComp = Math.min(100, (nitrato / 200) * 100);
-      const matrizComp = Math.min(100, (matriz / 200) * 100);
+      const nitrato = row ? row.nitratoStock : targetStock;
+      const matriz = row ? row.matrizStock : targetStock;
+      const nitratoComp = Math.min(100, (nitrato / targetStock) * 100);
+      const matrizComp = Math.min(100, (matriz / targetStock) * 100);
       dayCompSum += (nitratoComp + matrizComp) / 2;
     });
     rawMaterialsCompliance = dayCompSum / dates.length;

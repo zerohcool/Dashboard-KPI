@@ -109,6 +109,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const qualityCompliances = useMemo(() => dbService.getQualityComplianceForRange(startDate, endDate), [startDate, endDate, fleet]);
   const weeklyAttendances = useMemo(() => dbService.getWeeklyAttendanceList(), [fleet]);
 
+  const targetStock = useMemo(() => {
+    const k = kpis.find(item => item.id === 'kpi-insumos');
+    return k ? parseFloat(k.expectedVal) || 200 : 200;
+  }, [kpis]);
+
+  const minStock = useMemo(() => {
+    const k = kpis.find(item => item.id === 'kpi-insumos');
+    return k ? parseFloat(k.minVal) || 170 : 170;
+  }, [kpis]);
+
   // Period compliance editing state (Phase 17: edited directly in Dashboard)
   const [periodCompliancesState, setPeriodCompliancesState] = useState<Record<string, { realValue: number; compliancePct: number }>>({});
 
@@ -1134,7 +1144,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               <div className="kpi-value" style={{ color: '#f59e0b' }}>
                 {avgNitrato.toLocaleString()} ton
               </div>
-              <span className="kpi-subtext">Mínimo contractual: 200 ton diarios</span>
+              <span className="kpi-subtext">Mínimo contractual: {minStock} ton diarios</span>
             </div>
 
             <div className="glass kpi-card" style={{ '--card-accent': '#0284c7' } as any}>
@@ -1142,7 +1152,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               <div className="kpi-value" style={{ color: '#0284c7' }}>
                 {avgMatriz.toLocaleString()} ton
               </div>
-              <span className="kpi-subtext">Mínimo contractual: 200 ton diarios</span>
+              <span className="kpi-subtext">Mínimo contractual: {minStock} ton diarios</span>
             </div>
 
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--primary)' } as any}>
@@ -1183,18 +1193,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                   />
                   <Legend verticalAlign="top" height={36} />
                   <ReferenceLine 
-                    y={170} 
+                    y={minStock} 
                     stroke="rgba(239, 68, 68, 0.4)" 
                     strokeWidth={1.5} 
                     strokeDasharray="3 3" 
-                    label={{ value: 'Mínimo (170 ton)', fill: 'rgba(239, 68, 68, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
+                    label={{ value: `Mínimo (${minStock} ton)`, fill: 'rgba(239, 68, 68, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
                   />
                   <ReferenceLine 
-                    y={200} 
+                    y={targetStock} 
                     stroke="rgba(59, 130, 246, 0.4)" 
                     strokeWidth={1.5} 
                     strokeDasharray="3 3" 
-                    label={{ value: 'Esperado / Máximo (200 ton)', fill: 'rgba(59, 130, 246, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
+                    label={{ value: `Esperado / Máximo (${targetStock} ton)`, fill: 'rgba(59, 130, 246, 0.7)', fontSize: 9, position: 'top', fontWeight: 'bold' }} 
                   />
                   <Area 
                     type="monotone" 
@@ -1234,9 +1244,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                 </thead>
                 <tbody>
                   {[...rawMaterials].sort((a, b) => b.date.localeCompare(a.date)).map(row => {
-                    const nitratoPct = Math.min(100, (row.nitratoStock / 200) * 100);
-                    const matrizPct = Math.min(100, (row.matrizStock / 200) * 100);
-                    const isAllOk = row.nitratoStock >= 200 && row.matrizStock >= 200;
+                    const nitratoPct = Math.min(100, (row.nitratoStock / targetStock) * 100);
+                    const matrizPct = Math.min(100, (row.matrizStock / targetStock) * 100);
+                    const isAllOk = row.nitratoStock >= targetStock && row.matrizStock >= targetStock;
 
                     return (
                       <tr key={row.date}>

@@ -25,13 +25,13 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
   const handleGuestLogin = () => {
     const guestUser: ContractUser = {
       id: 'user-guest',
-      username: 'usuario.visualizador',
-      name: 'Usuario Visualizador',
-      email: 'visualizador@enaex.com',
+      username: 'usuario',
+      name: 'Usuario',
+      email: 'usuario@enaex.com',
       role: 'Usuario'
     };
     onLogin(guestUser);
-    addToast('Sesión iniciada como Usuario (Visualizador)', 'success');
+    addToast('Sesión iniciada como Usuario', 'success');
   };
 
   const handleAdminLogin = (e: React.FormEvent) => {
@@ -171,7 +171,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
               transition: 'all 0.15s ease'
             }}
           >
-            Usuario Visualizador
+            Usuario
           </button>
           <button
             onClick={() => { setActiveTab('admin'); setErrorMsg(''); }}
@@ -207,7 +207,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
               marginBottom: '24px',
               textAlign: 'center'
             }}>
-              Acceso público e inmediato con privilegios de <strong>Solo Lectura</strong> para visualizar el Dashboard de KPIs y Fórmulas del Contrato.
+              Acceso con privilegios para visualizar el Dashboard de KPIs y Fórmulas del Contrato.
             </div>
             
             <button

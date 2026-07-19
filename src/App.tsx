@@ -86,11 +86,11 @@ function App() {
 
     switch (activeView) {
       case 'dashboard':
-        return <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+        return <DashboardView fleet={fleet} addToast={addToast} />;
       case 'dailylog':
         return currentUser.role === 'Administrador' 
           ? <DailyLogView fleet={fleet} addToast={addToast} /> 
-          : <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+          : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'fleet':
         return currentUser.role === 'Administrador' ? (
           <FleetView
@@ -98,7 +98,7 @@ function App() {
             onFleetChanged={refreshFleet}
             addToast={addToast}
           />
-        ) : <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+        ) : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'contract':
         return currentUser.role === 'Administrador' ? (
           <ContractConfigView
@@ -106,15 +106,15 @@ function App() {
             onConfigChanged={refreshFleet}
             addToast={addToast}
           />
-        ) : <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+        ) : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'users':
         return currentUser.role === 'Administrador'
           ? <UsersConfigView currentUser={currentUser} addToast={addToast} />
-          : <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+          : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'methodology':
         return <MethodologyView />;
       default:
-        return <DashboardView fleet={fleet} addToast={addToast} currentUser={currentUser} />;
+        return <DashboardView fleet={fleet} addToast={addToast} />;
     }
   };
 

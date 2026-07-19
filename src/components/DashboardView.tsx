@@ -1692,45 +1692,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                   </tr>
                 </thead>
                 <tbody>
-                  {kpis.filter(k => k.category === 'seguridad').map(k => {
+                  {kpis.filter(k => k.category === 'seguridad').map((k, idx) => {
                     const realVal = periodCompliancesState[k.id]?.realValue ?? 0;
                     const compPct = metrics.safetyCompliancesMap[k.id] ?? 100.0;
                     const weightedVal = (k.weight * compPct) / 100;
+                    const isLowerHalf = idx >= 3;
 
                     return (
                       <tr key={k.id}>
-                        <td 
-                          style={{ fontWeight: '600', position: 'relative' }}
-                          onMouseEnter={() => setHoveredKpiId(k.id)}
-                          onMouseLeave={() => setHoveredKpiId(null)}
-                        >
-                          <span style={{ borderBottom: '1px dotted var(--primary)', cursor: 'help' }}>
-                            {k.name}
+                        <td style={{ fontWeight: '600' }}>
+                          <span 
+                            style={{ position: 'relative', display: 'inline-block' }}
+                            onMouseEnter={() => setHoveredKpiId(k.id)}
+                            onMouseLeave={() => setHoveredKpiId(null)}
+                          >
+                            <span style={{ borderBottom: '1px dotted var(--primary)', cursor: 'help' }}>
+                              {k.name}
+                            </span>
+                            {hoveredKpiId === k.id && SAFETY_KPI_DESCRIPTIONS[k.id] && (
+                              <div className="glass" style={{
+                                position: 'absolute',
+                                left: '100%',
+                                top: isLowerHalf ? 'auto' : '0',
+                                bottom: isLowerHalf ? '0' : 'auto',
+                                marginLeft: '8px',
+                                width: '340px',
+                                background: 'var(--bg-card)',
+                                border: '1px solid var(--border-color)',
+                                borderRadius: '8px',
+                                boxShadow: 'var(--shadow-xl)',
+                                padding: '12px',
+                                zIndex: 100,
+                                pointerEvents: 'none',
+                                textAlign: 'left'
+                              }}>
+                                <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)' }}>
+                                  {SAFETY_KPI_DESCRIPTIONS[k.id].title}
+                                </h4>
+                                <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: '1.4', color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>
+                                  {SAFETY_KPI_DESCRIPTIONS[k.id].desc}
+                                </p>
+                              </div>
+                            )}
                           </span>
-                          {hoveredKpiId === k.id && SAFETY_KPI_DESCRIPTIONS[k.id] && (
-                            <div className="glass" style={{
-                              position: 'absolute',
-                              left: '100%',
-                              top: '0',
-                              marginLeft: '12px',
-                              width: '340px',
-                              background: 'var(--bg-card)',
-                              border: '1px solid var(--border-color)',
-                              borderRadius: '8px',
-                              boxShadow: 'var(--shadow-xl)',
-                              padding: '12px',
-                              zIndex: 100,
-                              pointerEvents: 'none',
-                              textAlign: 'left'
-                            }}>
-                              <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)' }}>
-                                {SAFETY_KPI_DESCRIPTIONS[k.id].title}
-                              </h4>
-                              <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: '1.4', color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>
-                                {SAFETY_KPI_DESCRIPTIONS[k.id].desc}
-                              </p>
-                            </div>
-                          )}
                         </td>
                         <td style={{ textAlign: 'center' }}>{k.weight}%</td>
                         <td style={{ textAlign: 'center' }}>{k.unit}</td>

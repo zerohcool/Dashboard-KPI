@@ -10,6 +10,29 @@ interface ContractConfigViewProps {
   addToast: (text: string, type: 'success' | 'error') => void;
 }
 
+const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> = {
+  'kpi-seg-trirf': {
+    title: 'Incidentes que afectan al TRIRF (Accidentes de alto potencial / Incidentes Alto impacto)',
+    desc: 'Fatal(FI) - Tiempo Perdido (LTI) - Tratamiento medico (MTI) - Trabajo Restringido (RWI) - Alto Potencial - Alto Impacto.'
+  },
+  'kpi-seg-notrirf': {
+    title: 'Incidentes que no afectan al TRIRF',
+    desc: 'Accidentes STP (FA) - Daños a equipos - Fallas Operacionales - Impactos Ambientales Significativos.'
+  },
+  'kpi-seg-legal': {
+    title: 'Cumplimiento legal (fiscalizaciones estatales)',
+    desc: 'Hallazgos o sumarios de Sernageomin, Ministerio de Salud, Dirección del trabajo, SUCESO, SMA u otro organismo gubernamental, así como también de los Organismo administrador de la Ley.'
+  },
+  'kpi-seg-auditorias': {
+    title: 'Auditorías Internas',
+    desc: 'Evaluaciones bajo lo esperado de auditorías que realice SGSCM de manera Interna o Externa.'
+  },
+  'kpi-seg-incumplimiento': {
+    title: 'Incumplimiento de temas generales de salud, seguridad y medio ambiente',
+    desc: 'No cumplimiento de los Planes y Programas informados a la compañía.\n• No entrega de estadística E-200.\n• No entregar los Avances y Control de Programas SSMA Empresas contratistas / SG-GSSM-FOR-010.\n• No participar en actividades relevantes de salud, seguridad y medio ambiente de la compañía: reuniones Cero Daño, Campañas de seguridad, CPHS de faena, DPRF, etc.'
+  }
+};
+
 export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, onConfigChanged, addToast }) => {
   const [settings, setSettings] = useState<ContractSettings>({
     requiredFactoryTrucks: 5,
@@ -20,6 +43,7 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
 
   const [kpis, setKpis] = useState<ContractKPI[]>([]);
   const [roles, setRoles] = useState<ContractRole[]>([]);
+  const [hoveredKpiId, setHoveredKpiId] = useState<string | null>(null);
 
   // Add custom role form states
   const [newRoleName, setNewRoleName] = useState('');
@@ -587,9 +611,42 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
                 </tr>
               </thead>
               <tbody>
-                {kpisByCategory.seguridad.map(k => (
-                  <tr key={k.id}>
-                    <td style={{ fontWeight: '600', fontSize: '0.85rem' }}>{k.name}</td>
+                {kpisByCategory.seguridad.map(k => {
+                  const tooltipData = SAFETY_KPI_DESCRIPTIONS[k.id];
+                  return (
+                    <tr key={k.id}>
+                      <td 
+                        style={{ fontWeight: '600', fontSize: '0.85rem', position: 'relative' }}
+                        onMouseEnter={() => setHoveredKpiId(k.id)}
+                        onMouseLeave={() => setHoveredKpiId(null)}
+                      >
+                        <span style={{ borderBottom: '1px dotted var(--primary)', cursor: 'help' }}>
+                          {k.name}
+                        </span>
+                        {hoveredKpiId === k.id && tooltipData && (
+                          <div className="glass" style={{
+                            position: 'absolute',
+                            left: '10px',
+                            top: '34px',
+                            width: '340px',
+                            background: 'var(--bg-card)',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '8px',
+                            boxShadow: 'var(--shadow-xl)',
+                            padding: '12px',
+                            zIndex: 100,
+                            pointerEvents: 'none',
+                            textAlign: 'left'
+                          }}>
+                            <h4 style={{ margin: '0 0 6px 0', fontSize: '0.85rem', fontWeight: '700', color: 'var(--primary)' }}>
+                              {tooltipData.title}
+                            </h4>
+                            <p style={{ margin: 0, fontSize: '0.75rem', lineHeight: '1.4', color: 'var(--text-secondary)', whiteSpace: 'pre-line' }}>
+                              {tooltipData.desc}
+                            </p>
+                          </div>
+                        )}
+                      </td>
                     <td style={{ textAlign: 'center' }}>
                       <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
                         <input
@@ -608,7 +665,7 @@ export const ContractConfigView: React.FC<ContractConfigViewProps> = ({ fleet, o
                     <td style={{ textAlign: 'center' }}><input type="text" value={k.expectedVal} onChange={(e) => handleKPIChange(k.id, 'expectedVal', e.target.value)} style={{ width: '90px', textAlign: 'center', padding: '4px' }} /></td>
                     <td style={{ textAlign: 'center' }}><input type="text" value={k.maxVal} onChange={(e) => handleKPIChange(k.id, 'maxVal', e.target.value)} style={{ width: '90px', textAlign: 'center', padding: '4px' }} /></td>
                   </tr>
-                ))}
+                )})}
               </tbody>
             </table>
           </div>

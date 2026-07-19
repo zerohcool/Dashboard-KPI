@@ -49,6 +49,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const [endDate, setEndDate] = useState(todayStr);
   const [exportingPDF, setExportingPDF] = useState(false);
   const [modalEqId, setModalEqId] = useState<string | null>(null);
+  const [selectedRoleForModal, setSelectedRoleForModal] = useState<string | null>(null);
   
   // Dashboard Tabs (Phase 18: overview, raw_materials, attendance, kpi)
   const [activeTab, setActiveTab] = useState<'overview' | 'raw_materials' | 'attendance' | 'kpi'>('overview');
@@ -509,6 +510,39 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
       };
     });
   }, [roles, weeklyAttendances, recordsByDate]);
+
+  // Modal breakdown for dynamic dotation detail (Phase 22)
+  const modalData = useMemo(() => {
+    if (!selectedRoleForModal) return [];
+    const r = roles.find(ro => ro.roleName === selectedRoleForModal);
+    if (!r) return [];
+
+    const shift = getRoleShiftType(r.roleName);
+    const datesList = Object.keys(recordsByDate).sort();
+
+    return datesList.map(dateStr => {
+      const wedDate = getWednesdayStartDate(dateStr);
+      const att = weeklyAttendances.find(w => w.weekStartDate === wedDate);
+      const d = new Date(dateStr + 'T12:00:00');
+      const dayIdx = (d.getDay() + 4) % 7; // Wednesday is 0
+
+      const isRestDay4x3 = shift === '4x3' && (dayIdx === 2 || dayIdx === 3 || dayIdx === 4);
+      const required = isRestDay4x3 ? 0 : (shift === '7x7' ? r.requiredCount / 2 : r.requiredCount);
+      const attended = isRestDay4x3 ? 0 : ((att && att.attendanceData[r.roleName])
+        ? att.attendanceData[r.roleName][dayIdx]
+        : required);
+
+      const compliance = required > 0 ? parseFloat(((attended / required) * 100).toFixed(1)) : 100.0;
+
+      return {
+        date: dateStr,
+        required,
+        attended,
+        compliance,
+        isRestDay: isRestDay4x3
+      };
+    });
+  }, [selectedRoleForModal, roles, recordsByDate, weeklyAttendances]);
 
   const scoreBadge = getContractScoreBadge(metrics.weightedScore);
 
@@ -1277,7 +1311,21 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                         <td style={{ textAlign: 'center' }}>{row.requiredDaily * (row.shift === '7x7' ? 2 : 1)} pers</td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.requiredDaily} pers</td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{row.avgAttended} pers</td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: row.compliance >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)' }}>
+                        <td 
+                          style={{ 
+                            textAlign: 'center', 
+                            fontWeight: 'bold', 
+                            color: row.compliance >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)',
+                            cursor: row.compliance < 100 ? 'pointer' : 'default',
+                            textDecoration: row.compliance < 100 ? 'underline' : 'none'
+                          }}
+                          onClick={() => {
+                            if (row.compliance < 100) {
+                              setSelectedRoleForModal(row.roleName);
+                            }
+                          }}
+                          title={row.compliance < 100 ? 'Ver desglose diario de inasistencias' : undefined}
+                        >
                           {row.compliance}%
                         </td>
                         <td>
@@ -1768,6 +1816,106 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
               <button className="btn btn-secondary" onClick={() => setModalEqId(null)}>
                 Cerrar Detalle
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedRoleForModal && (
+        <div className="modal-backdrop" style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          backdropFilter: 'blur(8px)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div className="glass modal-content" style={{
+            width: '90%',
+            maxWidth: '650px',
+            maxHeight: '85vh',
+            overflowY: 'auto',
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '16px',
+            boxShadow: 'var(--shadow-xl)',
+            padding: '24px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                Detalle de Asistencia: {selectedRoleForModal}
+              </h3>
+              <button 
+                onClick={() => setSelectedRoleForModal(null)} 
+                style={{
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: 'none',
+                  color: 'var(--color-mantencioncorrectiva)',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                  fontWeight: '600'
+                }}
+              >
+                Cerrar
+              </button>
+            </div>
+
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: '16px' }}>
+              Desglose diario del período del <strong>{formatToDDMMYYYY(startDate)}</strong> al <strong>{formatToDDMMYYYY(endDate)}</strong>.
+            </p>
+
+            <div className="table-wrapper">
+              <table style={{ width: '100%' }}>
+                <thead>
+                  <tr>
+                    <th>Fecha</th>
+                    <th style={{ textAlign: 'center' }}>Requerido</th>
+                    <th style={{ textAlign: 'center' }}>Asistencia Real</th>
+                    <th style={{ textAlign: 'center' }}>% Cumplimiento</th>
+                    <th>Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modalData.map(d => {
+                    const formattedDate = formatToDDMMYYYY(d.date);
+                    const isUnder = !d.isRestDay && d.attended < d.required;
+                    
+                    return (
+                      <tr key={d.date} style={{ background: d.isRestDay ? 'rgba(0,0,0,0.02)' : 'none' }}>
+                        <td style={{ fontWeight: '600' }}>{formattedDate}</td>
+                        <td style={{ textAlign: 'center' }}>
+                          {d.isRestDay ? <span style={{ color: 'var(--text-muted)' }}>Descanso</span> : `${d.required} pers`}
+                        </td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: isUnder ? 'var(--color-mantencioncorrectiva)' : 'inherit' }}>
+                          {d.isRestDay ? '-' : `${d.attended} pers`}
+                        </td>
+                        <td style={{ 
+                          textAlign: 'center', 
+                          fontWeight: 'bold', 
+                          color: d.isRestDay ? 'var(--text-muted)' : d.compliance >= 100 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)'
+                        }}>
+                          {d.isRestDay ? '100%' : `${d.compliance}%`}
+                        </td>
+                        <td>
+                          {d.isRestDay ? (
+                            <span className="badge badge-operativo" style={{ opacity: 0.6 }}>Día Libre (4x3)</span>
+                          ) : isUnder ? (
+                            <span className="badge badge-mantencioncorrectiva">⚠ Faltas</span>
+                          ) : (
+                            <span className="badge badge-operativo">✓ Conforme</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

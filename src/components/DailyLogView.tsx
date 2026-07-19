@@ -331,6 +331,15 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     return parseFloat((12 - effectiveDown).toFixed(2));
   };
 
+  const formatDateDMY = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      return `${parts[2]}-${parts[1]}-${parts[0]}`;
+    }
+    return dateStr;
+  };
+
   const blastingHour = parseInt(blastingTime.split(':')[0], 10) || 19;
   const blastingMin = parseInt(blastingTime.split(':')[1], 10) || 0;
 
@@ -471,7 +480,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
             <span className="filter-label">Turno Semanal Activo (Miércoles a Martes)</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <Calendar size={18} className="text-secondary" />
-              <strong style={{ fontSize: '0.9rem' }}>Semana del miércoles {activeWeekStart} al martes {weekDays[6]?.dateStr}</strong>
+              <strong style={{ fontSize: '0.9rem' }}>Semana del miércoles {formatDateDMY(activeWeekStart)} al martes {formatDateDMY(weekDays[6]?.dateStr)}</strong>
             </div>
           </div>
         )}

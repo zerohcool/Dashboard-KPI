@@ -96,7 +96,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil']
   );
 
-  const [edpAmount, setEdpAmount] = useState<number>(4000000);
+  const [edpAmount, setEdpAmount] = useState<number>(465198.93);
   const [dolarRate, setDolarRate] = useState<number | null>(null);
 
   useEffect(() => {
@@ -1607,10 +1607,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                             </div>
                             <button 
                               className="btn btn-secondary btn-sm"
-                              onClick={() => setEdpAmount(4000000)}
+                              onClick={() => setEdpAmount(465198.93)}
                               style={{ padding: '0 12px', height: '38px' }}
                             >
-                              Ejemplo $4M USD
+                              Ejemplo $465K USD
                             </button>
                           </div>
                         </div>

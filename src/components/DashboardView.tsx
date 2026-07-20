@@ -96,7 +96,25 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
     ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil']
   );
 
-  const [edpAmount, setEdpAmount] = useState<number>(20000000);
+  const [edpAmount, setEdpAmount] = useState<number>(50000);
+  const [dolarRate, setDolarRate] = useState<number | null>(null);
+
+  useEffect(() => {
+    fetch('https://mindicador.cl/api/dolar')
+      .then(res => {
+        if (!res.ok) throw new Error('Error network response');
+        return res.json();
+      })
+      .then(data => {
+        if (data && data.serie && data.serie[0] && data.serie[0].valor) {
+          setDolarRate(data.serie[0].valor);
+        }
+      })
+      .catch(err => {
+        console.error('Error fetching exchange rate:', err);
+        setDolarRate(950); // Fallback standard
+      });
+  }, []);
 
   const getEDPMultiplier = useCallback((mdc: number): { multiplier: number; range: string; discount: number } => {
     if (mdc >= 100.0) {
@@ -1568,45 +1586,74 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                       <h4 style={{ margin: '0 0 8px 0', fontSize: '0.9rem', fontWeight: '700' }}>Simulador de Facturación</h4>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                         <div>
-                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Monto Estado de Pago Mensual (CLP)</label>
+                          <label style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>Monto Estado de Pago Mensual (USD)</label>
                           <div style={{ display: 'flex', gap: '8px' }}>
-                            <input 
-                              type="number" 
-                              value={edpAmount} 
-                              onChange={(e) => setEdpAmount(parseFloat(e.target.value) || 0)}
-                              style={{ 
-                                flex: 1,
-                                padding: '8px 12px', 
-                                borderRadius: '8px', 
-                                border: '1px solid var(--border-color)', 
-                                background: 'var(--bg-input)', 
-                                color: 'var(--text-input)',
-                                fontSize: '0.9rem' 
-                              }} 
-                            />
+                            <div style={{ position: 'relative', flex: 1 }}>
+                              <span style={{ position: 'absolute', left: '12px', top: '10px', fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600' }}>US$</span>
+                              <input 
+                                type="number" 
+                                value={edpAmount} 
+                                onChange={(e) => setEdpAmount(parseFloat(e.target.value) || 0)}
+                                style={{ 
+                                  width: '100%',
+                                  padding: '8px 12px 8px 42px', 
+                                  borderRadius: '8px', 
+                                  border: '1px solid var(--border-color)', 
+                                  background: 'var(--bg-input)', 
+                                  color: 'var(--text-input)',
+                                  fontSize: '0.9rem' 
+                                }} 
+                              />
+                            </div>
                             <button 
                               className="btn btn-secondary btn-sm"
-                              onClick={() => setEdpAmount(20000000)}
-                              style={{ padding: '0 12px' }}
+                              onClick={() => setEdpAmount(50000)}
+                              style={{ padding: '0 12px', height: '38px' }}
                             >
-                              Ejemplo 20M
+                              Ejemplo $50K USD
                             </button>
                           </div>
                         </div>
 
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginTop: '4px' }}>
-                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Total a Pagar ({edpResult.multiplier}%)</span>
                             <strong style={{ fontSize: '1.05rem', color: 'var(--color-operativo)' }}>
-                              ${Math.round(finalPayment).toLocaleString('es-CL')}
+                              US$ {finalPayment.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                             </strong>
+                            {dolarRate && (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                ≈ ${Math.round(finalPayment * dolarRate).toLocaleString('es-CL')} CLP
+                              </span>
+                            )}
                           </div>
-                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                          <div style={{ background: 'var(--bg-main)', padding: '10px', borderRadius: '8px', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '2px' }}>
                             <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', display: 'block' }}>Descuento ({edpResult.discount}%)</span>
                             <strong style={{ fontSize: '1.05rem', color: edpResult.discount > 0 ? 'var(--color-mantencioncorrectiva)' : 'var(--text-secondary)' }}>
-                              ${Math.round(discountValue).toLocaleString('es-CL')}
+                              US$ {discountValue.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}
                             </strong>
+                            {dolarRate && (
+                              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                                ≈ ${Math.round(discountValue * dolarRate).toLocaleString('es-CL')} CLP
+                              </span>
+                            )}
                           </div>
+                        </div>
+
+                        {/* Exchange rate info box */}
+                        <div style={{ 
+                          fontSize: '0.72rem', 
+                          color: 'var(--text-secondary)', 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '6px', 
+                          background: 'var(--primary-glow)', 
+                          padding: '8px 10px', 
+                          borderRadius: '8px', 
+                          border: '1px solid var(--primary-light)',
+                          marginTop: '4px' 
+                        }}>
+                          <span>💵 <strong>Dólar Observado:</strong> ${dolarRate ? dolarRate.toLocaleString('es-CL', { minimumFractionDigits: 2 }) : '950,00'} CLP/USD {dolarRate ? '(Banco Central de Chile)' : '(Valor Estimado)'}</span>
                         </div>
                       </div>
                     </div>

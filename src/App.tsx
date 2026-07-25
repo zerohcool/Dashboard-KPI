@@ -14,6 +14,17 @@ import type { Equipment, ContractUser } from './services/db';
 
 function App() {
   const [activeView, setActiveView] = useState<string>('dashboard');
+  const [isDailyLogDirty, setIsDailyLogDirty] = useState<boolean>(false);
+
+  const handleViewChange = (view: string) => {
+    if (isDailyLogDirty && activeView === 'dailylog') {
+      const confirmLeave = window.confirm("Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?");
+      if (!confirmLeave) return;
+      setIsDailyLogDirty(false); // Reset dirty flag
+    }
+    setActiveView(view);
+  };
+
   const [fleet, setFleet] = useState<Equipment[]>([]);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
@@ -75,6 +86,11 @@ function App() {
   };
 
   const handleLogout = () => {
+    if (isDailyLogDirty) {
+      const confirmLeave = window.confirm("Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?");
+      if (!confirmLeave) return;
+      setIsDailyLogDirty(false);
+    }
     setCurrentUser(null);
     localStorage.removeItem('disponibilidad_equipos_session');
     setActiveView('dashboard');
@@ -89,7 +105,7 @@ function App() {
         return <DashboardView fleet={fleet} addToast={addToast} />;
       case 'dailylog':
         return currentUser.role === 'Administrador' 
-          ? <DailyLogView fleet={fleet} addToast={addToast} /> 
+          ? <DailyLogView fleet={fleet} addToast={addToast} onDirtyChange={setIsDailyLogDirty} /> 
           : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'fleet':
         return currentUser.role === 'Administrador' ? (
@@ -131,7 +147,7 @@ function App() {
     <div className="app-container">
       <Sidebar 
         activeView={activeView} 
-        setActiveView={setActiveView} 
+        setActiveView={handleViewChange} 
         theme={theme} 
         setTheme={setTheme} 
         currentUser={currentUser}

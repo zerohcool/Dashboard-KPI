@@ -19,6 +19,7 @@ const getStatusClass = (status: string) => {
 interface DailyLogViewProps {
   fleet: Equipment[];
   addToast: (text: string, type: 'success' | 'error') => void;
+  onDirtyChange?: (isDirty: boolean) => void;
 }
 
 interface FormRecordState {
@@ -29,7 +30,7 @@ interface FormRecordState {
   comment: string;
 }
 
-export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) => {
+export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onDirtyChange }) => {
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -53,6 +54,66 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   const [roles, setRoles] = useState<ContractRole[]>([]);
   const [weeklyRoster, setWeeklyRoster] = useState<Record<string, number[]>>({});
   const [weeklyComments, setWeeklyComments] = useState<Record<string, string>>({});
+
+  // Dirty States for Unsaved Changes prompts
+  const [isEquipmentsDirty, setIsEquipmentsDirty] = useState<boolean>(false);
+  const [isRawMaterialsDirty, setIsRawMaterialsDirty] = useState<boolean>(false);
+  const [isRosterDirty, setIsRosterDirty] = useState<boolean>(false);
+
+  const anyDirty = isEquipmentsDirty || isRawMaterialsDirty || isRosterDirty;
+
+  useEffect(() => {
+    if (onDirtyChange) {
+      onDirtyChange(anyDirty);
+    }
+  }, [anyDirty, onDirtyChange]);
+
+  const checkDirtyAndProceed = (proceed: () => void, tab: 'equipos' | 'insumos' | 'dotacion' | 'all') => {
+    let dirty = false;
+    let message = "Tiene cambios sin guardar en esta sección. ¿Desea salir sin guardar?";
+
+    if (tab === 'equipos' && isEquipmentsDirty) {
+      dirty = true;
+      message = "Tiene cambios sin guardar en Disponibilidad de Equipos. ¿Desea salir sin guardar?";
+    } else if (tab === 'insumos' && isRawMaterialsDirty) {
+      dirty = true;
+      message = "Tiene cambios sin guardar en Stock de Materias Primas. ¿Desea salir sin guardar?";
+    } else if (tab === 'dotacion' && isRosterDirty) {
+      dirty = true;
+      message = "Tiene cambios sin guardar en Disponibilidad de Dotación. ¿Desea salir sin guardar?";
+    } else if (tab === 'all' && anyDirty) {
+      dirty = true;
+      if (isEquipmentsDirty) message = "Tiene cambios sin guardar en Disponibilidad de Equipos. ¿Desea cambiar de fecha sin guardar?";
+      else if (isRawMaterialsDirty) message = "Tiene cambios sin guardar en Stock de Materias Primas. ¿Desea cambiar de fecha sin guardar?";
+      else if (isRosterDirty) message = "Tiene cambios sin guardar en Disponibilidad de Dotación. ¿Desea cambiar de fecha sin guardar?";
+    }
+
+    if (dirty) {
+      const confirmLeave = window.confirm(message);
+      if (!confirmLeave) return;
+
+      // Reset the dirty flags
+      if (tab === 'equipos' || tab === 'all') setIsEquipmentsDirty(false);
+      if (tab === 'insumos' || tab === 'all') setIsRawMaterialsDirty(false);
+      if (tab === 'dotacion' || tab === 'all') setIsRosterDirty(false);
+    }
+    proceed();
+  };
+
+  const handleSubTabChange = (newTab: 'equipos' | 'insumos' | 'dotacion') => {
+    checkDirtyAndProceed(() => {
+      setActiveSubTab(newTab);
+    }, activeSubTab);
+  };
+
+  const handleDateChange = (newDate: string) => {
+    checkDirtyAndProceed(() => {
+      setSelectedDate(newDate);
+      setIsEquipmentsDirty(false);
+      setIsRawMaterialsDirty(false);
+      setIsRosterDirty(false);
+    }, 'all');
+  };
 
   // Load blasting time & raw materials on date change
   useEffect(() => {
@@ -155,14 +216,17 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       }
       return next;
     });
+    setIsEquipmentsDirty(true);
   };
 
   const handleSelectAllEquipments = () => {
     setSelectedEqIds(new Set(fleet.map(eq => eq.id)));
+    setIsEquipmentsDirty(true);
   };
 
   const handleSelectNoneEquipments = () => {
     setSelectedEqIds(new Set());
+    setIsEquipmentsDirty(true);
   };
 
   const handleStatusChange = (eqId: string, status: AvailabilityRecord['status']) => {
@@ -176,6 +240,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         comment: status === 'Operativo' ? '' : prev[eqId].comment
       }
     }));
+    setIsEquipmentsDirty(true);
   };
 
   const handleStartHourChange = (eqId: string, startHour: number) => {
@@ -191,6 +256,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         }
       };
     });
+    setIsEquipmentsDirty(true);
   };
 
   const handleEndHourChange = (eqId: string, endHour: number) => {
@@ -206,6 +272,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         }
       };
     });
+    setIsEquipmentsDirty(true);
   };
 
   const handleCommentChange = (eqId: string, comment: string) => {
@@ -216,6 +283,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         comment
       }
     }));
+    setIsEquipmentsDirty(true);
   };
 
   const handleRosterCellChange = (roleName: string, dayIdx: number, val: number) => {
@@ -227,6 +295,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         [roleName]: arr
       };
     });
+    setIsRosterDirty(true);
   };
 
   // Save Daily Records (Availability & Raw Materials only)
@@ -263,6 +332,8 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     Promise.all(promises)
       .then(() => {
         addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
+        setIsEquipmentsDirty(false);
+        setIsRawMaterialsDirty(false);
       })
       .catch(err => {
         console.error(err);
@@ -275,6 +346,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster, weeklyComments)
       .then(() => {
         addToast(`Asistencia de la semana del ${activeWeekStart} guardada exitosamente.`, 'success');
+        setIsRosterDirty(false);
       })
       .catch(err => {
         console.error(err);
@@ -320,6 +392,9 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
     const prevRaw = dbService.getRawMaterialsForDate(prevDateStr);
     setNitratoStock(prevRaw.nitratoStock);
     setMatrizStock(prevRaw.matrizStock);
+
+    setIsEquipmentsDirty(true);
+    setIsRawMaterialsDirty(true);
 
     addToast(`Datos de equipos, stock de materias primas y hora de tronadura copiados de ayer. Recuerde guardar.`, 'success');
   };
@@ -406,7 +481,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
           <input
             type="date"
             value={selectedDate}
-            onChange={(e) => setSelectedDate(e.target.value)}
+            onChange={(e) => handleDateChange(e.target.value)}
             max={new Date().toISOString().split('T')[0]}
             style={{ width: '180px' }}
           />
@@ -505,7 +580,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
       {/* Tabs Menu Navigation (Phase 17: removed 'calidad') */}
       <div style={{ display: 'flex', borderBottom: '2px solid var(--border-color)', gap: '4px', marginBottom: '24px' }}>
         <button 
-          onClick={() => setActiveSubTab('equipos')}
+          onClick={() => handleSubTabChange('equipos')}
           style={{ 
             padding: '12px 20px', 
             fontWeight: '600', 
@@ -526,7 +601,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         </button>
 
         <button 
-          onClick={() => setActiveSubTab('insumos')}
+          onClick={() => handleSubTabChange('insumos')}
           style={{ 
             padding: '12px 20px', 
             fontWeight: '600', 
@@ -547,7 +622,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         </button>
 
         <button 
-          onClick={() => setActiveSubTab('dotacion')}
+          onClick={() => handleSubTabChange('dotacion')}
           style={{ 
             padding: '12px 20px', 
             fontWeight: '600', 
@@ -782,7 +857,10 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                   type="number"
                   min="0"
                   value={nitratoStock}
-                  onChange={(e) => setNitratoStock(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => {
+                    setNitratoStock(parseFloat(e.target.value) || 0);
+                    setIsRawMaterialsDirty(true);
+                  }}
                   style={{ width: '120px', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}
                 />
                 <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: '600' }}>ton</span>
@@ -799,7 +877,10 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                   type="number"
                   min="0"
                   value={matrizStock}
-                  onChange={(e) => setMatrizStock(parseFloat(e.target.value) || 0)}
+                  onChange={(e) => {
+                    setMatrizStock(parseFloat(e.target.value) || 0);
+                    setIsRawMaterialsDirty(true);
+                  }}
                   style={{ width: '120px', padding: '8px', textAlign: 'right', fontWeight: 'bold' }}
                 />
                 <span style={{ fontSize: '0.9rem', color: 'var(--text-secondary)', fontWeight: '600' }}>ton</span>
@@ -899,7 +980,10 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                           type="text"
                           placeholder="Ej: Ausencia justificada..."
                           value={weeklyComments[r.roleName] || ''}
-                          onChange={(e) => setWeeklyComments(prev => ({ ...prev, [r.roleName]: e.target.value }))}
+                          onChange={(e) => {
+                            setWeeklyComments(prev => ({ ...prev, [r.roleName]: e.target.value }));
+                            setIsRosterDirty(true);
+                          }}
                           style={{
                             width: '100%',
                             minWidth: '200px',

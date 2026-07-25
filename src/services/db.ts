@@ -62,6 +62,7 @@ export interface ContractRole {
 export interface WeeklyAttendance {
   weekStartDate: string; // YYYY-MM-DD (Wednesday)
   attendanceData: Record<string, number[]>; // Maps roleName -> 7 numbers (Wednesday to Tuesday)
+  comments?: Record<string, string>; // Maps roleName -> comment/observation string
 }
 
 // NEW INTERFACE FOR PERIOD COMPLIANCE (PHASE 17)
@@ -298,7 +299,8 @@ export const dbService = {
     if (!attErr && attData) {
       const mapped: WeeklyAttendance[] = attData.map((row: any) => ({
         weekStartDate: row.week_start_date,
-        attendanceData: row.attendance_data
+        attendanceData: row.attendance_data,
+        comments: row.comments || {}
       }));
       localStorage.setItem(STORAGE_KEYS.WEEKLY_ATTENDANCE, JSON.stringify(mapped));
     }
@@ -715,17 +717,29 @@ export const dbService = {
     return JSON.parse(data);
   },
 
-  async saveWeeklyAttendance(weekStartDate: string, attendanceData: Record<string, number[]>): Promise<void> {
+  async saveWeeklyAttendance(
+    weekStartDate: string, 
+    attendanceData: Record<string, number[]>, 
+    comments?: Record<string, string>
+  ): Promise<void> {
     const list = this.getWeeklyAttendanceList().filter(w => w.weekStartDate !== weekStartDate);
-    list.push({ weekStartDate, attendanceData });
+    list.push({ weekStartDate, attendanceData, comments });
     localStorage.setItem(STORAGE_KEYS.WEEKLY_ATTENDANCE, JSON.stringify(list));
 
     if (supabase) {
       const { error } = await supabase.from('weekly_attendance').upsert({
         week_start_date: weekStartDate,
-        attendance_data: attendanceData
+        attendance_data: attendanceData,
+        comments: comments || {}
       });
-      if (error) throw error;
+      if (error) {
+        console.warn('Upsert with comments failed, trying fallback without comments...', error);
+        const { error: fallbackErr } = await supabase.from('weekly_attendance').upsert({
+          week_start_date: weekStartDate,
+          attendance_data: attendanceData
+        });
+        if (fallbackErr) throw fallbackErr;
+      }
     }
   },
 

@@ -621,13 +621,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
         : required);
 
       const compliance = required > 0 ? parseFloat(((attended / required) * 100).toFixed(1)) : 100.0;
+      const comment = (att && att.comments && att.comments[r.roleName]) ? att.comments[r.roleName] : '';
 
       return {
         date: dateStr,
         required,
         attended,
         compliance,
-        isRestDay: isRestDay4x3
+        isRestDay: isRestDay4x3,
+        comment
       };
     });
   }, [selectedRoleForModal, roles, recordsByDate, weeklyAttendances]);
@@ -2192,6 +2194,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                     <th style={{ textAlign: 'center' }}>Asistencia Real</th>
                     <th style={{ textAlign: 'center' }}>% Cumplimiento</th>
                     <th>Estado</th>
+                    <th>Observación (Semana)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -2223,6 +2226,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                           ) : (
                             <span className="badge badge-operativo">✓ Conforme</span>
                           )}
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }} title={d.comment}>
+                            {d.comment || '-'}
+                          </span>
                         </td>
                       </tr>
                     );

@@ -52,6 +52,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
   const [activeWeekStart, setActiveWeekStart] = useState<string>('');
   const [roles, setRoles] = useState<ContractRole[]>([]);
   const [weeklyRoster, setWeeklyRoster] = useState<Record<string, number[]>>({});
+  const [weeklyComments, setWeeklyComments] = useState<Record<string, string>>({});
 
   // Load blasting time & raw materials on date change
   useEffect(() => {
@@ -75,6 +76,8 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
 
     const existingAtt = dbService.getWeeklyAttendance(activeWeekStart);
     const initialRoster: Record<string, number[]> = {};
+    const initialComments: Record<string, string> = {};
+
     contractRoles.forEach(r => {
       const shift = getRoleShiftType(r.roleName);
       const requiredDaily = shift === '7x7' ? r.requiredCount / 2 : r.requiredCount;
@@ -96,8 +99,14 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
         initialRoster[r.roleName][3] = 0;
         initialRoster[r.roleName][4] = 0;
       }
+
+      // Load comments from existing weekly attendance
+      initialComments[r.roleName] = (existingAtt.comments && existingAtt.comments[r.roleName])
+        ? existingAtt.comments[r.roleName]
+        : '';
     });
     setWeeklyRoster(initialRoster);
+    setWeeklyComments(initialComments);
   }, [activeWeekStart]);
 
   // Load records for selected date (Equipments)
@@ -263,7 +272,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
 
   // Save Weekly Attendance Roster
   const handleSaveWeeklyRoster = () => {
-    dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster)
+    dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster, weeklyComments)
       .then(() => {
         addToast(`Asistencia de la semana del ${activeWeekStart} guardada exitosamente.`, 'success');
       })
@@ -842,6 +851,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                       <div style={{ fontSize: '0.7rem', opacity: 0.6 }}>{d.shortLabel}</div>
                     </th>
                   ))}
+                  <th style={{ minWidth: '220px', textAlign: 'left' }}>Observaciones / Comentarios</th>
                 </tr>
               </thead>
               <tbody>
@@ -884,6 +894,24 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast }) =
                           </td>
                         );
                       })}
+                      <td>
+                        <input 
+                          type="text"
+                          placeholder="Ej: Ausencia justificada..."
+                          value={weeklyComments[r.roleName] || ''}
+                          onChange={(e) => setWeeklyComments(prev => ({ ...prev, [r.roleName]: e.target.value }))}
+                          style={{
+                            width: '100%',
+                            minWidth: '200px',
+                            padding: '6px 10px',
+                            border: '1px solid var(--border-color)',
+                            borderRadius: '6px',
+                            background: 'var(--bg-input)',
+                            color: 'var(--text-input)',
+                            fontSize: '0.82rem'
+                          }}
+                        />
+                      </td>
                     </tr>
                   );
                 })}

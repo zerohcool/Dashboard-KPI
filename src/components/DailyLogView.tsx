@@ -476,7 +476,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
       </div>
 
       {/* Date Selector Row */}
-      <div className="glass filter-bar" style={{ gap: '24px', marginBottom: '20px' }}>
+      <div className="glass filter-bar" style={{ gap: '24px', marginBottom: '20px', position: 'relative', zIndex: 90 }}>
         <div className="filter-group">
           <span className="filter-label">Fecha del Registro</span>
           <DatePicker

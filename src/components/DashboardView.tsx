@@ -657,13 +657,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
       </div>
 
       {/* Date Filters Bar */}
-      <div className="glass filter-bar">
+      <div className="glass filter-bar" style={{ position: 'relative', zIndex: 90 }}>
         <div className="filter-group">
           <span className="filter-label">Fecha Inicio</span>
           <DatePicker
             value={startDate}
             onChange={setStartDate}
             max={endDate}
+            rangeStart={startDate}
+            rangeEnd={endDate}
           />
         </div>
         <div className="filter-group">
@@ -673,6 +675,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
             onChange={setEndDate}
             min={startDate}
             max={todayStr}
+            rangeStart={startDate}
+            rangeEnd={endDate}
           />
         </div>
         

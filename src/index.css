@@ -303,6 +303,8 @@ body {
   align-items: center;
   padding: 16px 24px;
   margin-bottom: 24px;
+  position: relative;
+  z-index: 50; /* Ensure custom dropdowns appear on top of other content */
 }
 
 .filter-group {

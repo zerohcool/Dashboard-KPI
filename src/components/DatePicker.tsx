@@ -213,6 +213,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
       {/* Calendar Popover */}
       {isOpen && (
         <div
+          className="datepicker-popover"
           style={{
             position: 'absolute',
             top: 'calc(100% + 8px)',
@@ -221,8 +222,6 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             width: '310px',
             padding: '16px',
             borderRadius: '14px',
-            border: '1px solid var(--border-color)',
-            background: 'var(--bg-card)',
             backdropFilter: 'blur(20px)',
             WebkitBackdropFilter: 'blur(20px)',
             boxShadow: '0 10px 30px -5px rgba(0, 0, 0, 0.15), 0 8px 16px -6px rgba(0, 0, 0, 0.15)',

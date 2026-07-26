@@ -7,6 +7,7 @@ import type {
 } from '../services/db';
 import { getPluralType } from '../utils/calculations';
 import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar } from 'lucide-react';
+import { DatePicker } from './DatePicker';
 
 const getStatusClass = (status: string) => {
   return status
@@ -478,10 +479,9 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
       <div className="glass filter-bar" style={{ gap: '24px', marginBottom: '20px' }}>
         <div className="filter-group">
           <span className="filter-label">Fecha del Registro</span>
-          <input
-            type="date"
+          <DatePicker
             value={selectedDate}
-            onChange={(e) => handleDateChange(e.target.value)}
+            onChange={(val) => handleDateChange(val)}
             max={new Date().toISOString().split('T')[0]}
             style={{ width: '180px' }}
           />

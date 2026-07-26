@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
+import { DatePicker } from './DatePicker';
 
 const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> = {
   'kpi-seg-trirf': {
@@ -659,19 +660,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
       <div className="glass filter-bar">
         <div className="filter-group">
           <span className="filter-label">Fecha Inicio</span>
-          <input
-            type="date"
+          <DatePicker
             value={startDate}
-            onChange={(e) => setStartDate(e.target.value)}
+            onChange={setStartDate}
             max={endDate}
           />
         </div>
         <div className="filter-group">
           <span className="filter-label">Fecha Fin</span>
-          <input
-            type="date"
+          <DatePicker
             value={endDate}
-            onChange={(e) => setEndDate(e.target.value)}
+            onChange={setEndDate}
             min={startDate}
             max={todayStr}
           />

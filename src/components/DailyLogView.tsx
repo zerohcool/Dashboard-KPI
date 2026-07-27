@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useImperativeHandle } from 'react';
 import { 
   dbService, parseBlastingTimeToDecimal, getWednesdayStartDate, getRoleShiftType 
 } from '../services/db';
@@ -8,6 +8,7 @@ import type {
 import { getPluralType } from '../utils/calculations';
 import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar } from 'lucide-react';
 import { DatePicker } from './DatePicker';
+import { ConfirmDialog } from './ConfirmDialog';
 
 const getStatusClass = (status: string) => {
   return status
@@ -31,7 +32,7 @@ interface FormRecordState {
   comment: string;
 }
 
-export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onDirtyChange }) => {
+export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<void> }, DailyLogViewProps>(({ fleet, addToast, onDirtyChange }, ref) => {
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -61,6 +62,24 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
   const [isRawMaterialsDirty, setIsRawMaterialsDirty] = useState<boolean>(false);
   const [isRosterDirty, setIsRosterDirty] = useState<boolean>(false);
 
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    saveLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onSave?: () => void;
+    onCancel?: () => void;
+    variant?: 'danger' | 'warning' | 'primary';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
+
   const anyDirty = isEquipmentsDirty || isRawMaterialsDirty || isRosterDirty;
 
   useEffect(() => {
@@ -69,9 +88,20 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
     }
   }, [anyDirty, onDirtyChange]);
 
+  useImperativeHandle(ref, () => ({
+    saveCurrentTab: async () => {
+      if (activeSubTab === 'dotacion') {
+        await handleSaveWeeklyRoster();
+      } else {
+        await handleSaveDaily();
+      }
+    }
+  }));
+
   const checkDirtyAndProceed = (proceed: () => void, tab: 'equipos' | 'insumos' | 'dotacion' | 'all') => {
     let dirty = false;
     let message = "Tiene cambios sin guardar en esta sección. ¿Desea salir sin guardar?";
+    let title = "Cambios sin guardar";
 
     if (tab === 'equipos' && isEquipmentsDirty) {
       dirty = true;
@@ -90,14 +120,34 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
     }
 
     if (dirty) {
-      const confirmLeave = window.confirm(message);
-      if (!confirmLeave) return;
-
-      // Reset the dirty flags
-      if (tab === 'equipos' || tab === 'all') setIsEquipmentsDirty(false);
-      if (tab === 'insumos' || tab === 'all') setIsRawMaterialsDirty(false);
-      if (tab === 'dotacion' || tab === 'all') setIsRosterDirty(false);
+      setConfirmDialog({
+        isOpen: true,
+        title,
+        message,
+        confirmLabel: "Sí, salir sin guardar",
+        saveLabel: "Guardar",
+        cancelLabel: "Cancelar",
+        onConfirm: () => {
+          if (tab === 'equipos' || tab === 'all') setIsEquipmentsDirty(false);
+          if (tab === 'insumos' || tab === 'all') setIsRawMaterialsDirty(false);
+          if (tab === 'dotacion' || tab === 'all') setIsRosterDirty(false);
+          proceed();
+        },
+        onSave: () => {
+          if (tab === 'dotacion') {
+            handleSaveWeeklyRoster().then(() => {
+              proceed();
+            });
+          } else {
+            handleSaveDaily().then(() => {
+              proceed();
+            });
+          }
+        }
+      });
+      return;
     }
+    
     proceed();
   };
 
@@ -300,37 +350,15 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
   };
 
   // Save Daily Records (Availability & Raw Materials only)
-  const handleSaveDaily = () => {
+  const executeSaveDaily = () => {
     const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
-    
-    const invalidRecords = recordsToSave.filter(r => {
-      return r.status !== 'Operativo' && r.endHour - r.startHour <= 0;
-    });
-
-    if (invalidRecords.length > 0) {
-      addToast('Los equipos fuera de servicio deben tener un rango de horas válido (Término > Inicio).', 'error');
-      return;
-    }
-
-    const existingRecords = dbService.getAvailabilityForDate(selectedDate);
-    const existingRaw = dbService.getRawMaterials().some(r => r.date === selectedDate);
-    
-    if (existingRecords.length > 0 || existingRaw) {
-      const confirmOverwrite = window.confirm(
-        `¿Está seguro de sobreescribir los registros existentes para el día ${selectedDate}?`
-      );
-      if (!confirmOverwrite) {
-        return;
-      }
-    }
-
     const promises: Promise<any>[] = [
       dbService.saveBlastingTimeForDate(selectedDate, blastingTime),
       dbService.saveAvailabilityRecords(selectedDate, recordsToSave),
       dbService.saveRawMaterialsForDate(selectedDate, nitratoStock, matrizStock)
     ];
 
-    Promise.all(promises)
+    return Promise.all(promises)
       .then(() => {
         addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
         setIsEquipmentsDirty(false);
@@ -339,12 +367,50 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
       .catch(err => {
         console.error(err);
         addToast('Error al guardar datos en Supabase.', 'error');
+        throw err;
       });
   };
 
+  const handleSaveDaily = (): Promise<void> => {
+    const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
+    
+    const invalidRecords = recordsToSave.filter(r => {
+      return r.status !== 'Operativo' && r.endHour - r.startHour <= 0;
+    });
+
+    if (invalidRecords.length > 0) {
+      addToast('Los equipos fuera de servicio deben tener un rango de horas válido (Término > Inicio).', 'error');
+      return Promise.reject('Invalid records');
+    }
+
+    const existingRecords = dbService.getAvailabilityForDate(selectedDate);
+    const existingRaw = dbService.getRawMaterials().some(r => r.date === selectedDate);
+    
+    if (existingRecords.length > 0 || existingRaw) {
+      return new Promise<void>((resolve, reject) => {
+        setConfirmDialog({
+          isOpen: true,
+          title: "Sobreescribir registros",
+          message: `¿Está seguro de sobreescribir los registros existentes para el día ${selectedDate}?`,
+          confirmLabel: "Sobreescribir",
+          cancelLabel: "Cancelar",
+          variant: 'danger',
+          onConfirm: () => {
+            executeSaveDaily().then(resolve).catch(reject);
+          },
+          onCancel: () => {
+            reject('Cancelled by user');
+          }
+        });
+      });
+    }
+
+    return executeSaveDaily();
+  };
+
   // Save Weekly Attendance Roster
-  const handleSaveWeeklyRoster = () => {
-    dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster, weeklyComments)
+  const handleSaveWeeklyRoster = (): Promise<void> => {
+    return dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster, weeklyComments)
       .then(() => {
         addToast(`Asistencia de la semana del ${activeWeekStart} guardada exitosamente.`, 'success');
         setIsRosterDirty(false);
@@ -352,6 +418,7 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
       .catch(err => {
         console.error(err);
         addToast('Error al guardar asistencia en Supabase.', 'error');
+        throw err;
       });
   };
 
@@ -1015,6 +1082,30 @@ export const DailyLogView: React.FC<DailyLogViewProps> = ({ fleet, addToast, onD
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        saveLabel={confirmDialog.saveLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        onConfirm={() => {
+          confirmDialog.onConfirm();
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }}
+        onSave={confirmDialog.onSave ? () => {
+          confirmDialog.onSave?.();
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        } : undefined}
+        onCancel={() => {
+          if (confirmDialog.onCancel) {
+            confirmDialog.onCancel();
+          }
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }}
+        variant={confirmDialog.variant}
+      />
     </div>
   );
-};
+});

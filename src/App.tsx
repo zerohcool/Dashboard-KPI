@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { DashboardView } from './components/DashboardView';
 import { DailyLogView } from './components/DailyLogView';
@@ -11,16 +11,58 @@ import { ToastContainer } from './components/Toast';
 import type { ToastMessage } from './components/Toast';
 import { dbService } from './services/db';
 import type { Equipment, ContractUser } from './services/db';
+import { ConfirmDialog } from './components/ConfirmDialog';
 
 function App() {
   const [activeView, setActiveView] = useState<string>('dashboard');
   const [isDailyLogDirty, setIsDailyLogDirty] = useState<boolean>(false);
+  const dailyLogRef = useRef<{ saveCurrentTab: () => Promise<void> } | null>(null);
+
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    confirmLabel?: string;
+    saveLabel?: string;
+    cancelLabel?: string;
+    onConfirm: () => void;
+    onSave?: () => void;
+    onCancel?: () => void;
+    variant?: 'danger' | 'warning' | 'primary';
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
   const handleViewChange = (view: string) => {
     if (isDailyLogDirty && activeView === 'dailylog') {
-      const confirmLeave = window.confirm("Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?");
-      if (!confirmLeave) return;
-      setIsDailyLogDirty(false); // Reset dirty flag
+      setConfirmDialog({
+        isOpen: true,
+        title: "Cambios sin guardar",
+        message: "Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?",
+        confirmLabel: "Sí, salir sin guardar",
+        saveLabel: "Guardar",
+        cancelLabel: "Cancelar",
+        onConfirm: () => {
+          setIsDailyLogDirty(false);
+          setActiveView(view);
+        },
+        onSave: () => {
+          if (dailyLogRef.current) {
+            dailyLogRef.current.saveCurrentTab()
+              .then(() => {
+                setIsDailyLogDirty(false);
+                setActiveView(view);
+              })
+              .catch(err => {
+                console.error("Failed to save before navigating:", err);
+              });
+          }
+        }
+      });
+      return;
     }
     setActiveView(view);
   };
@@ -86,10 +128,38 @@ function App() {
   };
 
   const handleLogout = () => {
-    if (isDailyLogDirty) {
-      const confirmLeave = window.confirm("Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?");
-      if (!confirmLeave) return;
-      setIsDailyLogDirty(false);
+    if (isDailyLogDirty && activeView === 'dailylog') {
+      setConfirmDialog({
+        isOpen: true,
+        title: "Cambios sin guardar",
+        message: "Tiene cambios sin guardar en el Registro Diario. ¿Desea salir sin guardar?",
+        confirmLabel: "Sí, salir sin guardar",
+        saveLabel: "Guardar",
+        cancelLabel: "Cancelar",
+        onConfirm: () => {
+          setIsDailyLogDirty(false);
+          setCurrentUser(null);
+          localStorage.removeItem('disponibilidad_equipos_session');
+          setActiveView('dashboard');
+          addToast('Sesión cerrada con éxito', 'success');
+        },
+        onSave: () => {
+          if (dailyLogRef.current) {
+            dailyLogRef.current.saveCurrentTab()
+              .then(() => {
+                setIsDailyLogDirty(false);
+                setCurrentUser(null);
+                localStorage.removeItem('disponibilidad_equipos_session');
+                setActiveView('dashboard');
+                addToast('Sesión cerrada con éxito', 'success');
+              })
+              .catch(err => {
+                console.error("Failed to save before logging out:", err);
+              });
+          }
+        }
+      });
+      return;
     }
     setCurrentUser(null);
     localStorage.removeItem('disponibilidad_equipos_session');
@@ -105,7 +175,7 @@ function App() {
         return <DashboardView fleet={fleet} addToast={addToast} />;
       case 'dailylog':
         return currentUser.role === 'Administrador' 
-          ? <DailyLogView fleet={fleet} addToast={addToast} onDirtyChange={setIsDailyLogDirty} /> 
+          ? <DailyLogView ref={dailyLogRef} fleet={fleet} addToast={addToast} onDirtyChange={setIsDailyLogDirty} /> 
           : <DashboardView fleet={fleet} addToast={addToast} />;
       case 'fleet':
         return currentUser.role === 'Administrador' ? (
@@ -157,6 +227,29 @@ function App() {
         {renderView()}
       </main>
       <ToastContainer toasts={toasts} onClose={removeToast} />
+      <ConfirmDialog
+        isOpen={confirmDialog.isOpen}
+        title={confirmDialog.title}
+        message={confirmDialog.message}
+        confirmLabel={confirmDialog.confirmLabel}
+        saveLabel={confirmDialog.saveLabel}
+        cancelLabel={confirmDialog.cancelLabel}
+        onConfirm={() => {
+          confirmDialog.onConfirm();
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }}
+        onSave={confirmDialog.onSave ? () => {
+          confirmDialog.onSave?.();
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        } : undefined}
+        onCancel={() => {
+          if (confirmDialog.onCancel) {
+            confirmDialog.onCancel();
+          }
+          setConfirmDialog(prev => ({ ...prev, isOpen: false }));
+        }}
+        variant={confirmDialog.variant}
+      />
     </div>
   );
 }

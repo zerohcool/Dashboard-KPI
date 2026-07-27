@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { dbService } from '../services/db';
 import type { ContractUser } from '../services/db';
 import { UserPlus, Edit2, Trash2, ShieldCheck, Mail, User, Lock, AlertCircle, X, ShieldAlert } from 'lucide-react';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface UsersConfigViewProps {
   currentUser: ContractUser;
@@ -12,6 +13,7 @@ export const UsersConfigView: React.FC<UsersConfigViewProps> = ({ currentUser, a
   const [users, setUsers] = useState<ContractUser[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<ContractUser | null>(null);
+  const [userToDelete, setUserToDelete] = useState<ContractUser | null>(null);
 
   // Form Fields
   const [name, setName] = useState('');
@@ -82,24 +84,12 @@ export const UsersConfigView: React.FC<UsersConfigViewProps> = ({ currentUser, a
       });
   };
 
-  const handleDelete = (userToDelete: ContractUser) => {
-    if (userToDelete.id === currentUser.id) {
+  const handleDelete = (user: ContractUser) => {
+    if (user.id === currentUser.id) {
       addToast('No puede eliminar su propia cuenta activa.', 'error');
       return;
     }
-
-    const confirmDel = window.confirm(`¿Está seguro de eliminar el usuario "${userToDelete.name}" del sistema?`);
-    if (!confirmDel) return;
-
-    dbService.deleteUser(userToDelete.id)
-      .then(() => {
-        addToast(`Usuario ${userToDelete.name} eliminado del sistema.`, 'success');
-        loadUsers();
-      })
-      .catch(err => {
-        console.error(err);
-        addToast('Error al eliminar usuario.', 'error');
-      });
+    setUserToDelete(user);
   };
 
   return (
@@ -406,6 +396,32 @@ export const UsersConfigView: React.FC<UsersConfigViewProps> = ({ currentUser, a
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        isOpen={userToDelete !== null}
+        title="Eliminar usuario"
+        message={`¿Está seguro de eliminar el usuario "${userToDelete?.name}" del sistema?`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        onConfirm={() => {
+          if (userToDelete) {
+            dbService.deleteUser(userToDelete.id)
+              .then(() => {
+                addToast(`Usuario ${userToDelete.name} eliminado del sistema.`, 'success');
+                loadUsers();
+              })
+              .catch(err => {
+                console.error(err);
+                addToast('Error al eliminar usuario.', 'error');
+              })
+              .finally(() => {
+                setUserToDelete(null);
+              });
+          }
+        }}
+        onCancel={() => setUserToDelete(null)}
+      />
     </div>
   );
 };

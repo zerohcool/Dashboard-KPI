@@ -3,6 +3,7 @@ import { dbService } from '../services/db';
 import type { Equipment } from '../services/db';
 import { getPluralType } from '../utils/calculations';
 import { Plus, Trash2, Edit2, X } from 'lucide-react';
+import { ConfirmDialog } from './ConfirmDialog';
 
 interface FleetViewProps {
   fleet: Equipment[];
@@ -12,6 +13,7 @@ interface FleetViewProps {
 
 export const FleetView: React.FC<FleetViewProps> = ({ fleet, onFleetChanged, addToast }) => {
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('All');
+  const [eqToDelete, setEqToDelete] = useState<{ id: string; name: string } | null>(null);
   
   // Add Form State
   const [name, setName] = useState('');
@@ -97,17 +99,7 @@ export const FleetView: React.FC<FleetViewProps> = ({ fleet, onFleetChanged, add
   };
 
   const handleDelete = (id: string, name: string) => {
-    if (window.confirm(`¿Está seguro de eliminar el equipo "${name}"? Esto también eliminará todo su historial de registros.`)) {
-      dbService.deleteEquipment(id)
-        .then(() => {
-          addToast(`Equipo ${name} eliminado.`, 'success');
-          onFleetChanged();
-        })
-        .catch(err => {
-          console.error(err);
-          addToast('Error al eliminar equipo en Supabase.', 'error');
-        });
-    }
+    setEqToDelete({ id, name });
   };
 
   const filteredFleet = selectedTypeFilter === 'All' 
@@ -368,6 +360,32 @@ export const FleetView: React.FC<FleetViewProps> = ({ fleet, onFleetChanged, add
           );
         })
       )}
+
+      <ConfirmDialog
+        isOpen={eqToDelete !== null}
+        title="Eliminar equipo"
+        message={`¿Está seguro de eliminar el equipo "${eqToDelete?.name}"? Esto también eliminará todo su historial de registros.`}
+        confirmLabel="Eliminar"
+        cancelLabel="Cancelar"
+        variant="danger"
+        onConfirm={() => {
+          if (eqToDelete) {
+            dbService.deleteEquipment(eqToDelete.id)
+              .then(() => {
+                addToast(`Equipo ${eqToDelete.name} eliminado.`, 'success');
+                onFleetChanged();
+              })
+              .catch(err => {
+                console.error(err);
+                addToast('Error al eliminar equipo en Supabase.', 'error');
+              })
+              .finally(() => {
+                setEqToDelete(null);
+              });
+          }
+        }}
+        onCancel={() => setEqToDelete(null)}
+      />
     </div>
   );
 };

@@ -227,6 +227,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     const selectedIds = new Set<string>();
     const initialState: Record<string, FormRecordState> = {};
     
+    // Always initialize default status for all fleet equipment
+    fleet.forEach(eq => {
+      initialState[eq.id] = {
+        equipmentId: eq.id,
+        status: 'Operativo',
+        startHour: 7,
+        endHour: 7,
+        comment: ''
+      };
+    });
+
     if (existing.length > 0) {
       existing.forEach(r => {
         if (fleet.some(eq => eq.id === r.equipmentId)) {
@@ -241,15 +252,9 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         }
       });
     } else {
+      // Default: select all fleet if no record exists for this date
       fleet.forEach(eq => {
         selectedIds.add(eq.id);
-        initialState[eq.id] = {
-          equipmentId: eq.id,
-          status: 'Operativo',
-          startHour: 7,
-          endHour: 7,
-          comment: ''
-        };
       });
     }
 

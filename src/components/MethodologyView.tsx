@@ -71,6 +71,9 @@ export const MethodologyView: React.FC = () => {
                     Cumplimiento Diario = (Min(100, (Stock Real Nitrato / {getKpiExpected('kpi-insumos')}) * 100) + Min(100, (Stock Real Matriz / {getKpiExpected('kpi-insumos')}) * 100)) / 2
                   </code>
                 </div>
+                <div style={{ background: 'var(--primary-glow)', padding: '10px 14px', borderRadius: '6px', border: '1px solid var(--primary-light)' }}>
+                  <strong>Regla de Meta Máxima:</strong> Al alcanzar o superar la meta contractual del <strong>95%</strong> de disponibilidad de flota, el cumplimiento de la categoría de Disponibilidad y Materias Primas se pondera al <strong>100%</strong> para el cálculo de la Nota Final de Contrato.
+                </div>
               </div>
             </div>
           </div>

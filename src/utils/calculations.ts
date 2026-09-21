@@ -189,6 +189,7 @@ export const calculateMetrics = (
   safetyCompliancesMap: Record<string, number>; // NEW OUTPUT (PHASE 17)
   attendanceCompliance: number;
   weightedScore: number;
+  fleetAndMaterialsCompliance: number;
 } => {
   const types = selectedTypes;
   void qualityCompliances;
@@ -446,6 +447,13 @@ export const calculateMetrics = (
       : 100.0;
   }
 
+  const overallPhysical = totalPhysicalTargetHours > 0 ? (totalPhysicalDeliveredHours / totalPhysicalTargetHours) * 100 : 100;
+  const overallContractual = totalContractTargetHours > 0 ? (totalContractDeliveredHours / totalContractTargetHours) * 100 : 100;
+
+  // Regla contractual: Si la Disponibilidad de Flota es superior o igual al 95%, el cumplimiento de flota y materias primas es 100%
+  const isFleetOver95 = overallContractual >= 95.0;
+  const fleetAndMaterialsCompliance = isFleetOver95 ? 100.0 : overallContractual;
+
   // 5. Final Weighted Score calculation
   let totalWeight = 0;
   let weightedSum = 0;
@@ -459,13 +467,16 @@ export const calculateMetrics = (
     if (isActive) {
       let compliance = 100.0;
       if (k.id === 'kpi-camiones') {
-        compliance = byType['Camión Fábrica']?.contractualAvailability ?? 100.0;
+        const avail = byType['Camión Fábrica']?.contractualAvailability ?? 100.0;
+        compliance = (isFleetOver95 || avail >= 95.0) ? 100.0 : avail;
       } else if (k.id === 'kpi-cargadores') {
-        compliance = byType['Cargador Frontal']?.contractualAvailability ?? 100.0;
+        const avail = byType['Cargador Frontal']?.contractualAvailability ?? 100.0;
+        compliance = (isFleetOver95 || avail >= 95.0) ? 100.0 : avail;
       } else if (k.id === 'kpi-polvorines') {
-        compliance = byType['Polvorín Móvil']?.contractualAvailability ?? 100.0;
+        const avail = byType['Polvorín Móvil']?.contractualAvailability ?? 100.0;
+        compliance = (isFleetOver95 || avail >= 95.0) ? 100.0 : avail;
       } else if (k.id === 'kpi-insumos') {
-        compliance = rawMaterialsCompliance;
+        compliance = isFleetOver95 ? 100.0 : rawMaterialsCompliance;
       } else if (k.category === 'calidad') {
         compliance = qualityCompliancesMap[k.id] ?? 100.0;
       } else if (k.id === 'kpi-dotacion-comprometida') {
@@ -482,8 +493,8 @@ export const calculateMetrics = (
   const weightedScore = totalWeight > 0 ? (weightedSum / totalWeight) : 100.0;
 
   return {
-    overallPhysical: totalPhysicalTargetHours > 0 ? (totalPhysicalDeliveredHours / totalPhysicalTargetHours) * 100 : 100,
-    overallContractual: totalContractTargetHours > 0 ? (totalContractDeliveredHours / totalContractTargetHours) * 100 : 100,
+    overallPhysical,
+    overallContractual,
     byType,
     dailyHistory,
     faultBreakdown,
@@ -492,7 +503,8 @@ export const calculateMetrics = (
     qualityCompliancesMap,
     safetyCompliancesMap,
     attendanceCompliance,
-    weightedScore
+    weightedScore,
+    fleetAndMaterialsCompliance
   };
 };
 

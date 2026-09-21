@@ -1492,10 +1492,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
                     <span>Disponibilidad de Flota y Materias Primas (Ponderación 31%)</span>
-                    <strong>{metrics.overallContractual.toFixed(1)}%</strong>
+                    <strong>{metrics.fleetAndMaterialsCompliance.toFixed(1)}%</strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${metrics.overallContractual}%`, height: '100%', background: 'var(--primary)', borderRadius: '4px' }}></div>
+                    <div style={{ width: `${Math.min(100, metrics.fleetAndMaterialsCompliance)}%`, height: '100%', background: 'var(--primary)', borderRadius: '4px' }}></div>
                   </div>
                 </div>
 
@@ -1762,7 +1762,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
                       realVal = metrics.rawMaterialsCompliance;
                     }
 
-                    const weightedVal = isExcluded ? 0 : (k.weight * realVal) / 100;
+                    const compliance = (metrics.overallContractual >= 95 || realVal >= 95) ? 100.0 : realVal;
+                    const weightedVal = isExcluded ? 0 : (k.weight * compliance) / 100;
 
                     return (
                       <tr key={k.id} style={{ opacity: isExcluded ? 0.4 : 1 }}>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { 
   dbService, parseBlastingTimeToDecimal, getWednesdayStartDate, getRoleShiftType 
 } from '../services/db';
@@ -6,7 +6,7 @@ import type {
   Equipment, AvailabilityRecord, ContractRole 
 } from '../services/db';
 import { getPluralType } from '../utils/calculations';
-import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar } from 'lucide-react';
+import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar, CheckCircle2 } from 'lucide-react';
 import { DatePicker } from './DatePicker';
 import { ConfirmDialog } from './ConfirmDialog';
 
@@ -79,6 +79,77 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     message: '',
     onConfirm: () => {},
   });
+
+  // State for missing dates tracking and dropdown
+  const [lastSavedTimestamp, setLastSavedTimestamp] = useState<number>(0);
+  const [showPendingMenu, setShowPendingMenu] = useState<boolean>(false);
+  const pendingMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close pending menu on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (pendingMenuRef.current && !pendingMenuRef.current.contains(event.target as Node)) {
+        setShowPendingMenu(false);
+      }
+    };
+    if (showPendingMenu) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [showPendingMenu]);
+
+  // Compute missing operational daily records for the viewed month
+  const missingDaysInfo = useMemo(() => {
+    const today = new Date();
+    const todayStr = today.toISOString().split('T')[0];
+
+    const parts = selectedDate.split('-');
+    const year = parseInt(parts[0], 10) || today.getFullYear();
+    const monthIndex = parseInt(parts[1], 10) - 1; // 0-indexed
+
+    const monthNames = [
+      'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+      'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+    ];
+    const monthName = monthNames[monthIndex] || '';
+
+    const totalDaysInMonth = new Date(year, monthIndex + 1, 0).getDate();
+    const allRecords = dbService.getAllRecords();
+    const datesWithRecords = new Set(allRecords.map(r => r.date));
+
+    const missing: { dateStr: string; dayNum: number; formatted: string }[] = [];
+
+    for (let d = 1; d <= totalDaysInMonth; d++) {
+      const dayFormatted = String(d).padStart(2, '0');
+      const monthFormatted = String(monthIndex + 1).padStart(2, '0');
+      const dateStr = `${year}-${monthFormatted}-${dayFormatted}`;
+
+      // Do not consider future dates as pending
+      if (dateStr > todayStr) {
+        continue;
+      }
+
+      if (!datesWithRecords.has(dateStr)) {
+        const dObj = new Date(year, monthIndex, d);
+        const dayOfWeek = dObj.toLocaleDateString('es-ES', { weekday: 'short' });
+        missing.push({
+          dateStr,
+          dayNum: d,
+          formatted: `${dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1)} ${d} de ${monthName}`
+        });
+      }
+    }
+
+    return {
+      missingDates: missing,
+      monthName,
+      year,
+      count: missing.length,
+      isCurrentMonth: (year === today.getFullYear() && monthIndex === today.getMonth())
+    };
+  }, [selectedDate, lastSavedTimestamp]);
 
   const anyDirty = isEquipmentsDirty || isRawMaterialsDirty || isRosterDirty;
 
@@ -368,6 +439,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
         setIsEquipmentsDirty(false);
         setIsRawMaterialsDirty(false);
+        setLastSavedTimestamp(Date.now());
       })
       .catch(err => {
         console.error(err);
@@ -547,6 +619,98 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         </div>
       </div>
 
+      {/* Banner de Estado de Registros Diarios (Opción 3) */}
+      {missingDaysInfo.count > 0 ? (
+        <div 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px 18px',
+            marginBottom: '18px',
+            borderRadius: '12px',
+            background: 'rgba(245, 158, 11, 0.08)',
+            border: '1px solid rgba(245, 158, 11, 0.3)',
+            color: 'var(--text-primary)',
+            gap: '16px',
+            flexWrap: 'wrap'
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div style={{ 
+              width: '34px', 
+              height: '34px', 
+              borderRadius: '8px', 
+              background: 'rgba(245, 158, 11, 0.18)', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center',
+              color: '#f59e0b',
+              flexShrink: 0
+            }}>
+              <AlertCircle size={18} />
+            </div>
+            <div>
+              <div style={{ fontSize: '0.9rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                {missingDaysInfo.count === 1 
+                  ? `Falta 1 día sin registrar en ${missingDaysInfo.monthName} ${missingDaysInfo.year}`
+                  : `Faltan ${missingDaysInfo.count} días sin registrar en ${missingDaysInfo.monthName} ${missingDaysInfo.year}`}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                Fechas pendientes: {missingDaysInfo.missingDates.slice(0, 6).map(m => m.dayNum).join(', ')}
+                {missingDaysInfo.missingDates.length > 6 ? ` y ${missingDaysInfo.missingDates.length - 6} más...` : ''}
+              </div>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => handleDateChange(missingDaysInfo.missingDates[0].dateStr)}
+            style={{
+              borderColor: 'rgba(245, 158, 11, 0.5)',
+              color: '#f59e0b',
+              fontWeight: '600',
+              padding: '6px 14px',
+              fontSize: '0.82rem'
+            }}
+          >
+            Completar primer día ({missingDaysInfo.missingDates[0].dateStr.split('-').reverse().join('/')}) →
+          </button>
+        </div>
+      ) : (
+        <div 
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            padding: '10px 16px',
+            marginBottom: '18px',
+            borderRadius: '12px',
+            background: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.25)',
+            color: 'var(--text-primary)'
+          }}
+        >
+          <div style={{ 
+            width: '28px', 
+            height: '28px', 
+            borderRadius: '8px', 
+            background: 'rgba(16, 185, 129, 0.15)', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            color: '#10b981',
+            flexShrink: 0
+          }}>
+            <CheckCircle2 size={16} />
+          </div>
+          <span style={{ fontSize: '0.85rem', fontWeight: '600' }}>
+            ✓ Todos los registros de {missingDaysInfo.monthName} {missingDaysInfo.year} se encuentran al día hasta la fecha.
+          </span>
+        </div>
+      )}
+
       {/* Date Selector Row */}
       <div className="glass filter-bar" style={{ gap: '24px', marginBottom: '20px', position: 'relative', zIndex: 90 }}>
         <div className="filter-group">
@@ -557,6 +721,104 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
             max={new Date().toISOString().split('T')[0]}
             style={{ width: '180px' }}
           />
+        </div>
+
+        {/* Acceso Rápido a Días Pendientes (Opción 2) */}
+        <div ref={pendingMenuRef} className="filter-group" style={{ position: 'relative' }}>
+          <span className="filter-label">Estado del Mes</span>
+          <button
+            type="button"
+            onClick={() => setShowPendingMenu(prev => !prev)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              padding: '10px 14px',
+              borderRadius: '10px',
+              border: missingDaysInfo.count > 0 
+                ? '1px solid rgba(245, 158, 11, 0.4)' 
+                : '1px solid rgba(16, 185, 129, 0.3)',
+              background: missingDaysInfo.count > 0 
+                ? 'rgba(245, 158, 11, 0.08)' 
+                : 'rgba(16, 185, 129, 0.08)',
+              color: missingDaysInfo.count > 0 ? '#f59e0b' : '#10b981',
+              fontWeight: '600',
+              fontSize: '0.88rem',
+              height: '42px',
+              cursor: 'pointer',
+              outline: 'none',
+              transition: 'all 0.15s ease'
+            }}
+          >
+            {missingDaysInfo.count > 0 ? (
+              <>
+                <AlertCircle size={16} />
+                <span>{missingDaysInfo.count} {missingDaysInfo.count === 1 ? 'Día Pendiente' : 'Días Pendientes'}</span>
+                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>▼</span>
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={16} />
+                <span>Mes al día</span>
+              </>
+            )}
+          </button>
+
+          {/* Menú desplegable de fechas pendientes */}
+          {showPendingMenu && missingDaysInfo.count > 0 && (
+            <div
+              className="glass table-card"
+              style={{
+                position: 'absolute',
+                top: 'calc(100% + 8px)',
+                left: 0,
+                zIndex: 1000,
+                width: '280px',
+                maxHeight: '320px',
+                overflowY: 'auto',
+                padding: '12px',
+                borderRadius: '12px',
+                boxShadow: '0 10px 30px -5px rgba(0,0,0,0.3)',
+                animation: 'fadeIn 0.15s ease-out'
+              }}
+            >
+              <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between' }}>
+                <span>DÍAS SIN REGISTRO</span>
+                <span>{missingDaysInfo.count} en total</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {missingDaysInfo.missingDates.map(m => (
+                  <button
+                    key={m.dateStr}
+                    type="button"
+                    onClick={() => {
+                      setShowPendingMenu(false);
+                      handleDateChange(m.dateStr);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '8px 10px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color)',
+                      background: 'var(--bg-card)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer',
+                      fontSize: '0.82rem',
+                      textAlign: 'left',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-card)'}
+                  >
+                    <span style={{ textTransform: 'capitalize' }}>{m.formatted}</span>
+                    <span style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '700' }}>Cargar →</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         {activeSubTab === 'equipos' && (

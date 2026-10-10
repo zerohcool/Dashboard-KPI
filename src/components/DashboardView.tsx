@@ -41,6 +41,7 @@ const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> =
 interface DashboardViewProps {
   fleet: Equipment[];
   addToast: (text: string, type: 'success' | 'error') => void;
+  syncVersion?: number;
 }
 
 const getStatusClass = (status: string) => {
@@ -59,7 +60,7 @@ const formatToDDMMYYYY = (dateStr: string) => {
   return dateStr;
 };
 
-export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast }) => {
+export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, syncVersion }) => {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   
   // Set default range to last 14 days
@@ -136,15 +137,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast })
   const dashboardRef = useRef<HTMLDivElement>(null);
 
   // Fetch contract settings & availability records for range
-  const settings = useMemo(() => dbService.getContractSettings(), [fleet]);
-  const records = useMemo(() => dbService.getAvailabilityRecords(startDate, endDate), [startDate, endDate, fleet]);
+  const settings = useMemo(() => dbService.getContractSettings(), [fleet, syncVersion]);
+  const records = useMemo(() => dbService.getAvailabilityRecords(startDate, endDate), [startDate, endDate, fleet, syncVersion]);
 
   // Load new KPI datasets
-  const kpis = useMemo(() => dbService.getContractKPIs(), [fleet]);
-  const roles = useMemo(() => dbService.getContractRoles(), [fleet]);
-  const rawMaterials = useMemo(() => dbService.getRawMaterialsForRange(startDate, endDate), [startDate, endDate, fleet]);
-  const qualityCompliances = useMemo(() => dbService.getQualityComplianceForRange(startDate, endDate), [startDate, endDate, fleet]);
-  const weeklyAttendances = useMemo(() => dbService.getWeeklyAttendanceList(), [fleet]);
+  const kpis = useMemo(() => dbService.getContractKPIs(), [fleet, syncVersion]);
+  const roles = useMemo(() => dbService.getContractRoles(), [fleet, syncVersion]);
+  const rawMaterials = useMemo(() => dbService.getRawMaterialsForRange(startDate, endDate), [startDate, endDate, fleet, syncVersion]);
+  const qualityCompliances = useMemo(() => dbService.getQualityComplianceForRange(startDate, endDate), [startDate, endDate, fleet, syncVersion]);
+  const weeklyAttendances = useMemo(() => dbService.getWeeklyAttendanceList(), [fleet, syncVersion]);
 
   const targetStock = useMemo(() => {
     const k = kpis.find(item => item.id === 'kpi-insumos');

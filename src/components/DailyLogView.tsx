@@ -22,6 +22,7 @@ interface DailyLogViewProps {
   fleet: Equipment[];
   addToast: (text: string, type: 'success' | 'error') => void;
   onDirtyChange?: (isDirty: boolean) => void;
+  syncVersion?: number;
 }
 
 interface FormRecordState {
@@ -32,7 +33,7 @@ interface FormRecordState {
   comment: string;
 }
 
-export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<void> }, DailyLogViewProps>(({ fleet, addToast, onDirtyChange }, ref) => {
+export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<void> }, DailyLogViewProps>(({ fleet, addToast, onDirtyChange, syncVersion }, ref) => {
   const [selectedDate, setSelectedDate] = useState<string>(
     new Date().toISOString().split('T')[0]
   );
@@ -85,6 +86,23 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
   const [showPendingMenu, setShowPendingMenu] = useState<boolean>(false);
   const pendingMenuRef = useRef<HTMLDivElement>(null);
 
+  // Status indicators for current selectedDate
+  const isDateEquipmentsSaved = useMemo(() => {
+    return dbService.hasAvailabilityForDate(selectedDate);
+  }, [selectedDate, lastSavedTimestamp, syncVersion]);
+
+  const isDateRawMaterialsSaved = useMemo(() => {
+    return dbService.hasRawMaterialsForDate(selectedDate);
+  }, [selectedDate, lastSavedTimestamp, syncVersion]);
+
+  const isWeekRosterSaved = useMemo(() => {
+    return dbService.hasWeeklyAttendance(activeWeekStart);
+  }, [activeWeekStart, lastSavedTimestamp, syncVersion]);
+
+  const savedEquipmentsCount = useMemo(() => {
+    return dbService.getAvailabilityForDate(selectedDate).length;
+  }, [selectedDate, lastSavedTimestamp, syncVersion]);
+
   // Close pending menu on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -117,9 +135,18 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
 
     const totalDaysInMonth = new Date(year, monthIndex + 1, 0).getDate();
     const allRecords = dbService.getAllRecords();
-    const datesWithRecords = new Set(allRecords.map(r => r.date));
+    const datesWithEquipments = new Set(allRecords.map(r => r.date));
+    const allRaw = dbService.getRawMaterials();
+    const datesWithRaw = new Set(allRaw.map(r => r.date));
 
-    const missing: { dateStr: string; dayNum: number; formatted: string }[] = [];
+    const missing: { 
+      dateStr: string; 
+      dayNum: number; 
+      formatted: string; 
+      detail: string;
+      missingEquipments: boolean;
+      missingRaw: boolean;
+    }[] = [];
 
     for (let d = 1; d <= totalDaysInMonth; d++) {
       const dayFormatted = String(d).padStart(2, '0');
@@ -131,13 +158,27 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         continue;
       }
 
-      if (!datesWithRecords.has(dateStr)) {
+      const hasEq = datesWithEquipments.has(dateStr);
+      const hasRaw = datesWithRaw.has(dateStr);
+
+      if (!hasEq || !hasRaw) {
         const dObj = new Date(year, monthIndex, d);
         const dayOfWeek = dObj.toLocaleDateString('es-ES', { weekday: 'short' });
+
+        let detail = 'Faltan Equipos y Materias Primas';
+        if (hasEq && !hasRaw) {
+          detail = 'Falta Stock de Materias Primas';
+        } else if (!hasEq && hasRaw) {
+          detail = 'Falta Disponibilidad de Equipos';
+        }
+
         missing.push({
           dateStr,
           dayNum: d,
-          formatted: `${dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1)} ${d} de ${monthName}`
+          formatted: `${dayOfWeek.charAt(0).toUpperCase() + dayOfWeek.slice(1)} ${d} de ${monthName}`,
+          detail,
+          missingEquipments: !hasEq,
+          missingRaw: !hasRaw
         });
       }
     }
@@ -149,7 +190,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
       count: missing.length,
       isCurrentMonth: (year === today.getFullYear() && monthIndex === today.getMonth())
     };
-  }, [selectedDate, lastSavedTimestamp]);
+  }, [selectedDate, lastSavedTimestamp, syncVersion]);
 
   const anyDirty = isEquipmentsDirty || isRawMaterialsDirty || isRosterDirty;
 
@@ -163,8 +204,10 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     saveCurrentTab: async () => {
       if (activeSubTab === 'dotacion') {
         await handleSaveWeeklyRoster();
+      } else if (activeSubTab === 'insumos') {
+        await handleSaveRawMaterials();
       } else {
-        await handleSaveDaily();
+        await handleSaveEquipments();
       }
     }
   }));
@@ -209,8 +252,20 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
             handleSaveWeeklyRoster().then(() => {
               proceed();
             });
+          } else if (tab === 'insumos') {
+            handleSaveRawMaterials().then(() => {
+              proceed();
+            });
+          } else if (tab === 'equipos') {
+            handleSaveEquipments().then(() => {
+              proceed();
+            });
           } else {
-            handleSaveDaily().then(() => {
+            const promises: Promise<any>[] = [];
+            if (isEquipmentsDirty) promises.push(executeSaveEquipments());
+            if (isRawMaterialsDirty) promises.push(executeSaveRawMaterials());
+            if (isRosterDirty) promises.push(handleSaveWeeklyRoster());
+            Promise.all(promises).then(() => {
               proceed();
             });
           }
@@ -237,7 +292,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     }, 'all');
   };
 
-  // Load blasting time & raw materials on date change
+  // Load blasting time & raw materials on date change or sync
   useEffect(() => {
     const dailyBlasting = dbService.getBlastingTimeForDate(selectedDate);
     setBlastingTime(dailyBlasting);
@@ -249,9 +304,9 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
 
     // Sync week start date to matching date
     setActiveWeekStart(getWednesdayStartDate(selectedDate));
-  }, [selectedDate]);
+  }, [selectedDate, syncVersion, lastSavedTimestamp]);
 
-  // Load roster data when weekStartDate changes
+  // Load roster data when weekStartDate changes or sync
   useEffect(() => {
     if (!activeWeekStart) return;
     const contractRoles = dbService.getContractRoles();
@@ -290,7 +345,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     });
     setWeeklyRoster(initialRoster);
     setWeeklyComments(initialComments);
-  }, [activeWeekStart]);
+  }, [activeWeekStart, syncVersion, lastSavedTimestamp]);
 
   // Load records for selected date (Equipments)
   useEffect(() => {
@@ -331,7 +386,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
 
     setSelectedEqIds(selectedIds);
     setFormState(initialState);
-  }, [selectedDate, fleet]);
+  }, [selectedDate, fleet, syncVersion, lastSavedTimestamp]);
 
   const handleToggleEquipment = (eqId: string) => {
     setSelectedEqIds(prev => {
@@ -425,30 +480,28 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     setIsRosterDirty(true);
   };
 
-  // Save Daily Records (Availability & Raw Materials only)
-  const executeSaveDaily = () => {
+  // 1. Save Equipments & Blasting Time
+  const executeSaveEquipments = () => {
     const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
     const promises: Promise<any>[] = [
       dbService.saveBlastingTimeForDate(selectedDate, blastingTime),
-      dbService.saveAvailabilityRecords(selectedDate, recordsToSave),
-      dbService.saveRawMaterialsForDate(selectedDate, nitratoStock, matrizStock)
+      dbService.saveAvailabilityRecords(selectedDate, recordsToSave)
     ];
 
     return Promise.all(promises)
       .then(() => {
-        addToast(`Registro del día ${selectedDate} guardado exitosamente.`, 'success');
+        addToast(`Disponibilidad de equipos para el día ${selectedDate} guardada exitosamente.`, 'success');
         setIsEquipmentsDirty(false);
-        setIsRawMaterialsDirty(false);
         setLastSavedTimestamp(Date.now());
       })
       .catch(err => {
         console.error(err);
-        addToast('Error al guardar datos en Supabase.', 'error');
+        addToast('Error al guardar datos de equipos en Supabase.', 'error');
         throw err;
       });
   };
 
-  const handleSaveDaily = (): Promise<void> => {
+  const handleSaveEquipments = (): Promise<void> => {
     const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
     
     const invalidRecords = recordsToSave.filter(r => {
@@ -460,20 +513,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
       return Promise.reject('Invalid records');
     }
 
-    const existingRecords = dbService.getAvailabilityForDate(selectedDate);
-    const existingRaw = dbService.getRawMaterials().some(r => r.date === selectedDate);
-    
-    if (existingRecords.length > 0 || existingRaw) {
+    if (dbService.hasAvailabilityForDate(selectedDate)) {
       return new Promise<void>((resolve, reject) => {
         setConfirmDialog({
           isOpen: true,
-          title: "Sobreescribir registros",
-          message: `¿Está seguro de sobreescribir los registros existentes para el día ${selectedDate}?`,
+          title: "Sobreescribir registros de equipos",
+          message: `¿Está seguro de sobreescribir la disponibilidad de equipos existente para el día ${selectedDate}?`,
           confirmLabel: "Sobreescribir",
           cancelLabel: "Cancelar",
           variant: 'danger',
           onConfirm: () => {
-            executeSaveDaily().then(resolve).catch(reject);
+            executeSaveEquipments().then(resolve).catch(reject);
           },
           onCancel: () => {
             reject('Cancelled by user');
@@ -482,15 +532,66 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
       });
     }
 
+    return executeSaveEquipments();
+  };
+
+  // 2. Save Raw Materials
+  const executeSaveRawMaterials = () => {
+    return dbService.saveRawMaterialsForDate(selectedDate, nitratoStock, matrizStock)
+      .then(() => {
+        addToast(`Stock de materias primas para el día ${selectedDate} guardado exitosamente.`, 'success');
+        setIsRawMaterialsDirty(false);
+        setLastSavedTimestamp(Date.now());
+      })
+      .catch(err => {
+        console.error(err);
+        addToast('Error al guardar stock de materias primas en Supabase.', 'error');
+        throw err;
+      });
+  };
+
+  const handleSaveRawMaterials = (): Promise<void> => {
+    if (dbService.hasRawMaterialsForDate(selectedDate)) {
+      return new Promise<void>((resolve, reject) => {
+        setConfirmDialog({
+          isOpen: true,
+          title: "Sobreescribir stock de materias primas",
+          message: `¿Está seguro de sobreescribir el stock de materias primas existente para el día ${selectedDate}?`,
+          confirmLabel: "Sobreescribir",
+          cancelLabel: "Cancelar",
+          variant: 'danger',
+          onConfirm: () => {
+            executeSaveRawMaterials().then(resolve).catch(reject);
+          },
+          onCancel: () => {
+            reject('Cancelled by user');
+          }
+        });
+      });
+    }
+
+    return executeSaveRawMaterials();
+  };
+
+  // 3. Save Both (Equipments + Raw Materials) if needed
+  const executeSaveDaily = () => {
+    return Promise.all([
+      executeSaveEquipments(),
+      executeSaveRawMaterials()
+    ]).then(() => {});
+  };
+
+  const handleSaveDaily = (): Promise<void> => {
     return executeSaveDaily();
   };
 
-  // Save Weekly Attendance Roster
+  // 4. Save Weekly Attendance Roster
   const handleSaveWeeklyRoster = (): Promise<void> => {
     return dbService.saveWeeklyAttendance(activeWeekStart, weeklyRoster, weeklyComments)
       .then(() => {
         addToast(`Asistencia de la semana del ${activeWeekStart} guardada exitosamente.`, 'success');
         setIsRosterDirty(false);
+        setLastSavedTimestamp(Date.now());
       })
       .catch(err => {
         console.error(err);
@@ -598,15 +699,27 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
           <p>Seleccione la fecha de registro y cargue los parámetros diarios y materias primas</p>
         </div>
         <div className="actions-group">
-          {activeSubTab !== 'dotacion' && (
+          {activeSubTab === 'equipos' && (
             <>
               <button className="btn btn-secondary" onClick={copyFromPreviousDay}>
                 <Copy size={16} />
                 <span>Copiar de ayer</span>
               </button>
-              <button className="btn btn-primary" onClick={handleSaveDaily}>
+              <button className="btn btn-primary" onClick={handleSaveEquipments}>
                 <Save size={16} />
-                <span>Guardar Registro Diario</span>
+                <span>Guardar Disponibilidad de Equipos</span>
+              </button>
+            </>
+          )}
+          {activeSubTab === 'insumos' && (
+            <>
+              <button className="btn btn-secondary" onClick={copyFromPreviousDay}>
+                <Copy size={16} />
+                <span>Copiar de ayer</span>
+              </button>
+              <button className="btn btn-primary" onClick={handleSaveRawMaterials}>
+                <Save size={16} />
+                <span>Guardar Stock de Materias Primas</span>
               </button>
             </>
           )}
@@ -773,8 +886,8 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                 top: 'calc(100% + 8px)',
                 left: 0,
                 zIndex: 1000,
-                width: '280px',
-                maxHeight: '320px',
+                width: '320px',
+                maxHeight: '340px',
                 overflowY: 'auto',
                 padding: '12px',
                 borderRadius: '12px',
@@ -794,6 +907,11 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                     onClick={() => {
                       setShowPendingMenu(false);
                       handleDateChange(m.dateStr);
+                      if (m.missingEquipments) {
+                        handleSubTabChange('equipos');
+                      } else if (m.missingRaw) {
+                        handleSubTabChange('insumos');
+                      }
                     }}
                     style={{
                       display: 'flex',
@@ -802,7 +920,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                       padding: '8px 10px',
                       borderRadius: '8px',
                       border: '1px solid var(--border-color)',
-                      background: 'var(--bg-card)',
+                      background: m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)',
                       color: 'var(--text-primary)',
                       cursor: 'pointer',
                       fontSize: '0.82rem',
@@ -810,15 +928,77 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                       transition: 'all 0.15s ease'
                     }}
                     onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = 'var(--bg-card)'}
+                    onMouseLeave={(e) => e.currentTarget.style.background = m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)'}
                   >
-                    <span style={{ textTransform: 'capitalize' }}>{m.formatted}</span>
-                    <span style={{ fontSize: '0.75rem', color: '#f59e0b', fontWeight: '700' }}>Cargar →</span>
+                    <div>
+                      <div style={{ fontWeight: '600', textTransform: 'capitalize' }}>{m.formatted}</div>
+                      <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginTop: '2px' }}>
+                        {m.detail}
+                      </div>
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: '700' }}>Cargar →</span>
                   </button>
                 ))}
               </div>
             </div>
           )}
+        </div>
+
+        {/* Identificador y Estado de Registro del Día Seleccionado */}
+        <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          <span className="filter-label">Estado Registro {formatDateDMY(selectedDate)}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '42px', flexWrap: 'wrap' }}>
+            {/* Equipos badge */}
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '600',
+              background: isDateEquipmentsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
+              color: isDateEquipmentsSaved ? '#10b981' : '#ef4444',
+              border: isDateEquipmentsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+            }}>
+              {isDateEquipmentsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              <span>Equipos: {isDateEquipmentsSaved ? `Guardado (${savedEquipmentsCount})` : 'Sin registrar'}</span>
+            </span>
+
+            {/* Materias Primas badge */}
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '600',
+              background: isDateRawMaterialsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
+              color: isDateRawMaterialsSaved ? '#10b981' : '#ef4444',
+              border: isDateRawMaterialsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+            }}>
+              {isDateRawMaterialsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              <span>Materias Primas: {isDateRawMaterialsSaved ? 'Guardado' : 'Sin registrar'}</span>
+            </span>
+
+            {/* Dotación Semanal badge */}
+            <span style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              fontSize: '0.82rem',
+              fontWeight: '600',
+              background: isWeekRosterSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+              color: isWeekRosterSaved ? '#10b981' : '#f59e0b',
+              border: isWeekRosterSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)'
+            }}>
+              {isWeekRosterSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+              <span>Semana: {isWeekRosterSaved ? 'Dotación Guardada' : 'Dotación Pendiente'}</span>
+            </span>
+          </div>
         </div>
 
         {activeSubTab === 'equipos' && (
@@ -932,6 +1112,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         >
           <Truck size={16} />
           <span>1. Disponibilidad de Equipos</span>
+          <span style={{
+            fontSize: '0.72rem',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            fontWeight: '700',
+            background: isDateEquipmentsSaved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.12)',
+            color: isDateEquipmentsSaved ? '#10b981' : '#ef4444',
+            border: isDateEquipmentsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+          }}>
+            {isDateEquipmentsSaved ? '✓ Guardado' : '● Sin registrar'}
+          </span>
         </button>
 
         <button 
@@ -953,6 +1144,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         >
           <Layers size={16} />
           <span>2. Stock de Materias Primas</span>
+          <span style={{
+            fontSize: '0.72rem',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            fontWeight: '700',
+            background: isDateRawMaterialsSaved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.12)',
+            color: isDateRawMaterialsSaved ? '#10b981' : '#ef4444',
+            border: isDateRawMaterialsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+          }}>
+            {isDateRawMaterialsSaved ? '✓ Guardado' : '● Sin registrar'}
+          </span>
         </button>
 
         <button 
@@ -974,6 +1176,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         >
           <Users size={16} />
           <span>3. Disponibilidad de Dotación (Semanal)</span>
+          <span style={{
+            fontSize: '0.72rem',
+            padding: '2px 8px',
+            borderRadius: '12px',
+            fontWeight: '700',
+            background: isWeekRosterSaved ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.12)',
+            color: isWeekRosterSaved ? '#10b981' : '#f59e0b',
+            border: isWeekRosterSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)'
+          }}>
+            {isWeekRosterSaved ? '✓ Guardada' : '● Sin registrar'}
+          </span>
         </button>
       </div>
 

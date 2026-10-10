@@ -178,6 +178,36 @@ export const getRoleShiftType = (roleName: string): '4x3' | '7x7' => {
   return roleName.includes('7x7') ? '7x7' : '4x3';
 };
 
+// Helper to fetch all rows from Supabase bypassing the 1000 row default limit
+async function fetchAllFromTable<T = any>(tableName: string, batchSize: number = 1000): Promise<T[]> {
+  if (!supabase) return [];
+  let allRows: T[] = [];
+  let from = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const to = from + batchSize - 1;
+    const { data, error } = await supabase
+      .from(tableName)
+      .select('*')
+      .range(from, to);
+
+    if (error) throw error;
+    if (data && data.length > 0) {
+      allRows = allRows.concat(data as T[]);
+      if (data.length < batchSize) {
+        hasMore = false;
+      } else {
+        from += batchSize;
+      }
+    } else {
+      hasMore = false;
+    }
+  }
+
+  return allRows;
+}
+
 export const dbService = {
   isSupabaseEnabled(): boolean {
     return isSupabaseConfigured;
@@ -201,10 +231,9 @@ export const dbService = {
       localStorage.setItem(STORAGE_KEYS.EQUIPMENT, JSON.stringify(mappedFleet));
     }
     
-    // 2. Fetch blasting times
-    const { data: btData, error: btErr } = await supabase.from('blasting_times').select('*');
-    if (btErr) throw btErr;
-    if (btData) {
+    // 2. Fetch blasting times (paginated)
+    const btData = await fetchAllFromTable('blasting_times');
+    if (btData && btData.length > 0) {
       const btMap: Record<string, string> = {};
       btData.forEach((row: any) => {
         btMap[row.date] = row.time;
@@ -212,10 +241,9 @@ export const dbService = {
       localStorage.setItem('disponibilidad_equipos_blasting_times', JSON.stringify(btMap));
     }
     
-    // 3. Fetch availability records
-    const { data: recData, error: recErr } = await supabase.from('availability_records').select('*');
-    if (recErr) throw recErr;
-    if (recData) {
+    // 3. Fetch availability records (paginated to handle >1000 rows without truncating)
+    const recData = await fetchAllFromTable('availability_records');
+    if (recData && recData.length > 0) {
       const mappedRecords: AvailabilityRecord[] = recData.map((row: any) => ({
         id: row.id,
         equipmentId: row.equipment_id,
@@ -244,9 +272,9 @@ export const dbService = {
       localStorage.setItem(STORAGE_KEYS.SETTINGS, JSON.stringify(settingsMapped));
     }
 
-    // 5. Fetch daily raw materials
-    const { data: rawData, error: rawErr } = await supabase.from('daily_raw_materials').select('*');
-    if (!rawErr && rawData) {
+    // 5. Fetch daily raw materials (paginated)
+    const rawData = await fetchAllFromTable('daily_raw_materials');
+    if (rawData && rawData.length > 0) {
       const mapped: DailyRawMaterials[] = rawData.map((row: any) => ({
         date: row.date,
         nitratoStock: parseFloat(row.nitrato_stock),
@@ -272,9 +300,9 @@ export const dbService = {
       localStorage.setItem(STORAGE_KEYS.CONTRACT_KPIS, JSON.stringify(mapped));
     }
 
-    // 7. Fetch daily quality compliance
-    const { data: qualData, error: qualErr } = await supabase.from('daily_quality_compliance').select('*');
-    if (!qualErr && qualData) {
+    // 7. Fetch daily quality compliance (paginated)
+    const qualData = await fetchAllFromTable('daily_quality_compliance');
+    if (qualData && qualData.length > 0) {
       const mapped: DailyQualityCompliance[] = qualData.map((row: any) => ({
         date: row.date,
         kpiId: row.kpi_id,
@@ -294,9 +322,9 @@ export const dbService = {
       localStorage.setItem(STORAGE_KEYS.CONTRACT_ROLES, JSON.stringify(mapped));
     }
 
-    // 9. Fetch weekly attendance roster
-    const { data: attData, error: attErr } = await supabase.from('weekly_attendance').select('*');
-    if (!attErr && attData) {
+    // 9. Fetch weekly attendance roster (paginated)
+    const attData = await fetchAllFromTable('weekly_attendance');
+    if (attData && attData.length > 0) {
       const mapped: WeeklyAttendance[] = attData.map((row: any) => ({
         weekStartDate: row.week_start_date,
         attendanceData: row.attendance_data,
@@ -306,8 +334,8 @@ export const dbService = {
     }
 
     // 10. Fetch period compliance (NEW PHASE 17)
-    const { data: periodData, error: periodErr } = await supabase.from('period_compliance').select('*');
-    if (!periodErr && periodData) {
+    const periodData = await fetchAllFromTable('period_compliance');
+    if (periodData && periodData.length > 0) {
       const mapped: PeriodCompliance[] = periodData.map((row: any) => ({
         startDate: row.start_date,
         endDate: row.end_date,
@@ -477,6 +505,11 @@ export const dbService = {
     return records.filter(r => r.date === date);
   },
 
+  hasAvailabilityForDate(date: string): boolean {
+    const records = this.getAvailabilityForDate(date);
+    return records.length > 0;
+  },
+
   getBlastingTimeForDate(date: string): string {
     const data = localStorage.getItem('disponibilidad_equipos_blasting_times');
     if (!data) return '19:00';
@@ -615,6 +648,11 @@ export const dbService = {
     return found || { date, nitratoStock: 200, matrizStock: 200 };
   },
 
+  hasRawMaterialsForDate(date: string): boolean {
+    const all = this.getRawMaterials();
+    return all.some(r => r.date === date);
+  },
+
   getRawMaterialsForRange(startDate: string, endDate: string): DailyRawMaterials[] {
     const all = this.getRawMaterials();
     return all.filter(r => r.date >= startDate && r.date <= endDate);
@@ -715,6 +753,11 @@ export const dbService = {
     const data = localStorage.getItem(STORAGE_KEYS.WEEKLY_ATTENDANCE);
     if (!data) return [];
     return JSON.parse(data);
+  },
+
+  hasWeeklyAttendance(weekStartDate: string): boolean {
+    const list = this.getWeeklyAttendanceList();
+    return list.some(w => w.weekStartDate === weekStartDate);
   },
 
   async saveWeeklyAttendance(

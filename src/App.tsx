@@ -96,6 +96,8 @@ function App() {
     setToasts(prev => prev.filter(t => t.id !== id));
   }, []);
 
+  const [dataSyncVersion, setDataSyncVersion] = useState<number>(0);
+
   // Fetch fleet list
   const refreshFleet = useCallback(() => {
     setFleet(dbService.getEquipment());
@@ -108,6 +110,7 @@ function App() {
       dbService.syncFromSupabase()
         .then(() => {
           refreshFleet();
+          setDataSyncVersion(Date.now());
           // Seed users locally too after sync
           dbService.getUsers();
           addToast('Datos sincronizados con Supabase', 'success');
@@ -172,11 +175,11 @@ function App() {
 
     switch (activeView) {
       case 'dashboard':
-        return <DashboardView fleet={fleet} addToast={addToast} />;
+        return <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
       case 'dailylog':
         return currentUser.role === 'Administrador' 
-          ? <DailyLogView ref={dailyLogRef} fleet={fleet} addToast={addToast} onDirtyChange={setIsDailyLogDirty} /> 
-          : <DashboardView fleet={fleet} addToast={addToast} />;
+          ? <DailyLogView ref={dailyLogRef} fleet={fleet} addToast={addToast} onDirtyChange={setIsDailyLogDirty} syncVersion={dataSyncVersion} /> 
+          : <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
       case 'fleet':
         return currentUser.role === 'Administrador' ? (
           <FleetView
@@ -184,7 +187,7 @@ function App() {
             onFleetChanged={refreshFleet}
             addToast={addToast}
           />
-        ) : <DashboardView fleet={fleet} addToast={addToast} />;
+        ) : <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
       case 'contract':
         return currentUser.role === 'Administrador' ? (
           <ContractConfigView
@@ -192,15 +195,15 @@ function App() {
             onConfigChanged={refreshFleet}
             addToast={addToast}
           />
-        ) : <DashboardView fleet={fleet} addToast={addToast} />;
+        ) : <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
       case 'users':
         return currentUser.role === 'Administrador'
           ? <UsersConfigView currentUser={currentUser} addToast={addToast} />
-          : <DashboardView fleet={fleet} addToast={addToast} />;
+          : <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
       case 'methodology':
         return <MethodologyView />;
       default:
-        return <DashboardView fleet={fleet} addToast={addToast} />;
+        return <DashboardView fleet={fleet} addToast={addToast} syncVersion={dataSyncVersion} />;
     }
   };
 

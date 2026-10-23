@@ -24,8 +24,8 @@ export interface AvailabilityRecord {
   startHour: number; // e.g. 7 to 19
   endHour: number;   // e.g. 7 to 19
   hoursOutOfService: number; // calculated: endHour - startHour
-  hoursPostBlasting: number;  // calculated based on blastingTime of that date
-  hoursAvailable: number;    // 12 - (hoursOutOfService - hoursPostBlasting)
+  hoursPostBlasting: number;  // (Histórico / 0)
+  hoursAvailable: number;    // 12 - hoursOutOfService
   comment: string;
 }
 
@@ -542,7 +542,6 @@ export const dbService = {
     recordsInput: { equipmentId: string; status: AvailabilityRecord['status']; startHour: number; endHour: number; comment: string }[]
   ): Promise<void> {
     const allRecords = this.getAllRecords();
-    const blastingTime = this.getBlastingTimeForDate(date);
     
     let updatedRecords = allRecords.filter(r => r.date !== date);
     const recordsToInsert: AvailabilityRecord[] = [];
@@ -557,12 +556,10 @@ export const dbService = {
         startHour = Math.min(19, Math.max(7, input.startHour));
         endHour = Math.min(19, Math.max(startHour, input.endHour));
         hoursOutOfService = endHour - startHour;
-        
-        const blastingTimeDec = parseBlastingTimeToDecimal(blastingTime);
-        hoursPostBlasting = Math.max(0, endHour - Math.max(startHour, blastingTimeDec));
+        hoursPostBlasting = 0;
       }
       
-      const hoursAvailable = 12 - (hoursOutOfService - hoursPostBlasting);
+      const hoursAvailable = 12 - hoursOutOfService;
       
       const newRec: AvailabilityRecord = {
         id: generateId(),

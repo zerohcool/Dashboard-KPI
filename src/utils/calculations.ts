@@ -99,7 +99,7 @@ export const calculateTypeDailyHours = (
   records.forEach(r => {
     if (r.status !== 'Operativo') {
       const start = r.startHour;
-      const end = r.endHour - (r.hoursPostBlasting || 0);
+      const end = r.endHour;
       if (start < end) {
         downIntervals.push({ start, end });
       }
@@ -316,7 +316,7 @@ export const calculateMetrics = (
   records.forEach(r => {
     const eq = fleet.find(f => f.id === r.equipmentId);
     if (eq && selectedTypes.includes(eq.type) && r.status !== 'Operativo') {
-      const effectiveDown = r.hoursOutOfService - (r.hoursPostBlasting || 0);
+      const effectiveDown = r.hoursOutOfService;
       if (effectiveDown > 0) {
         faultCounts[r.status] += effectiveDown;
       }

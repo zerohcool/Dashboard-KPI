@@ -54,15 +54,9 @@ export const MethodologyView: React.FC = () => {
               <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--text-primary)' }}>Fórmulas de Cálculo (Base 12 Horas):</strong>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.85rem' }}>
                 <div>
-                  <strong>Disponibilidad Física (DF):</strong>
+                  <strong>Disponibilidad de Equipos (Turno 12 hrs):</strong>
                   <code style={{ display: 'block', background: 'rgba(0,0,0,0.03)', padding: '6px', borderRadius: '4px', marginTop: '4px', fontFamily: 'monospace' }}>
-                    DF = ((12 - Horas Fuera de Servicio) / 12) * 100
-                  </code>
-                </div>
-                <div>
-                  <strong>Disponibilidad Contractual (DC):</strong> Descuenta los tiempos de demora posteriores a la tronadura que no son imputables al equipo:
-                  <code style={{ display: 'block', background: 'rgba(0,0,0,0.03)', padding: '6px', borderRadius: '4px', marginTop: '4px', fontFamily: 'monospace' }}>
-                    DC = ((12 - (Horas Fuera de Servicio - Demora Post-Tronadura)) / 12) * 100
+                    Disponibilidad (%) = ((12 - Horas Fuera de Servicio) / 12) * 100
                   </code>
                 </div>
                 <div>

@@ -449,7 +449,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
 
       eqRecords.forEach(r => {
         availHours += r.hoursAvailable;
-        downHours += (r.hoursOutOfService - (r.hoursPostBlasting || 0));
+        downHours += r.hoursOutOfService;
       });
 
       const totalPossibleHours = eqRecords.length * 12;
@@ -1134,7 +1134,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     <th>Estado Operativo</th>
                     <th style={{ textAlign: 'center' }}>Rango Horas</th>
                     <th style={{ textAlign: 'center' }}>Horas Detenido</th>
-                    <th style={{ textAlign: 'center' }}>Post-Tronadura</th>
                     <th>Comentario / Detalle de Falla</th>
                   </tr>
                 </thead>
@@ -1160,9 +1159,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
                           {totalDown} hrs
                         </td>
-                        <td style={{ textAlign: 'center', color: r.hoursPostBlasting > 0 ? 'var(--color-operativo)' : 'var(--text-muted)' }}>
-                          {r.hoursPostBlasting > 0 ? `-${r.hoursPostBlasting} hrs` : '0 hrs'}
-                        </td>
                         <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios registrados.'}</td>
                       </tr>
                     );
@@ -1170,7 +1166,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
 
                   {failingEquipmentsRecords.length === 0 && (
                     <tr>
-                      <td colSpan={8} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
                         Todos los equipos seleccionados mantuvieron el 100% de disponibilidad en este período.
                       </td>
                     </tr>
@@ -2092,7 +2088,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     <th>Estado</th>
                     <th style={{ textAlign: 'center' }}>Rango Horas</th>
                     <th style={{ textAlign: 'center' }}>Horas Fuera Serv.</th>
-                    <th style={{ textAlign: 'center' }}>Post-Tronadura</th>
                     <th>Detalle de Falla / Comentario</th>
                   </tr>
                 </thead>
@@ -2113,9 +2108,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
                           {totalDown} hrs
                         </td>
-                        <td style={{ textAlign: 'center', color: r.hoursPostBlasting > 0 ? 'var(--color-operativo)' : 'var(--text-muted)' }}>
-                          {r.hoursPostBlasting > 0 ? `-${r.hoursPostBlasting} hrs` : '0 hrs'}
-                        </td>
                         <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios.'}</td>
                       </tr>
                     );
@@ -2123,7 +2115,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
 
                   {modalRecords.length === 0 && (
                     <tr>
-                      <td colSpan={6} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
+                      <td colSpan={5} style={{ textAlign: 'center', padding: '20px', color: 'var(--text-muted)' }}>
                         No hay fallas o mantenciones registradas en el período seleccionado.
                       </td>
                     </tr>

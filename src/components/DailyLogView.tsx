@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { 
-  dbService, parseBlastingTimeToDecimal, getWednesdayStartDate, getRoleShiftType 
+  dbService, getWednesdayStartDate, getRoleShiftType 
 } from '../services/db';
 import type { 
   Equipment, AvailabilityRecord, ContractRole 
@@ -652,13 +652,10 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
   const types: Equipment['type'][] = ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'];
   const hoursList = Array.from({ length: 13 }, (_, i) => i + 7);
 
-  const getAvailHours = (state: FormRecordState, bTime: string) => {
+  const getAvailHours = (state: FormRecordState) => {
     if (state.status === 'Operativo') return 12;
-    const totalDown = state.endHour - state.startHour;
-    const blastingTimeDec = parseBlastingTimeToDecimal(bTime);
-    const postBlastingDown = Math.max(0, state.endHour - Math.max(state.startHour, blastingTimeDec));
-    const effectiveDown = totalDown - postBlastingDown;
-    return parseFloat((12 - effectiveDown).toFixed(2));
+    const totalDown = Math.max(0, state.endHour - state.startHour);
+    return parseFloat(Math.max(0, 12 - totalDown).toFixed(2));
   };
 
   const formatDateDMY = (dateStr: string): string => {
@@ -668,6 +665,14 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
       return `${parts[2]}-${parts[1]}-${parts[0]}`;
     }
     return dateStr;
+  };
+
+  const formatFullDate = (dateStr: string): string => {
+    if (!dateStr) return '';
+    const parts = dateStr.split('-');
+    if (parts.length !== 3) return dateStr;
+    const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+    return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   };
 
   const blastingHour = parseInt(blastingTime.split(':')[0], 10) || 19;
@@ -690,6 +695,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
   };
 
   const weekDays = getWeekDates(activeWeekStart);
+  const activeWeekEnd = weekDays.length > 0 ? weekDays[weekDays.length - 1].dateStr : '';
 
   return (
     <div>
@@ -824,271 +830,347 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         </div>
       )}
 
-      {/* Date Selector Row */}
-      <div className="glass filter-bar" style={{ gap: '24px', marginBottom: '20px', position: 'relative', zIndex: 90 }}>
-        <div className="filter-group">
-          <span className="filter-label">Fecha del Registro</span>
+      {/* Date Selector Card with Permanent Inline Calendar */}
+      <div 
+        className="glass table-card" 
+        style={{ 
+          display: 'flex', 
+          flexDirection: 'row', 
+          gap: '24px', 
+          alignItems: 'flex-start', 
+          padding: '20px', 
+          marginBottom: '24px',
+          position: 'relative', 
+          zIndex: 90,
+          flexWrap: 'wrap'
+        }}
+      >
+        {/* Columna Izquierda: Calendario Inline Permanente */}
+        <div style={{ flexShrink: 0, width: '290px' }}>
+          <div style={{ marginBottom: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="filter-label" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Calendar size={13} style={{ color: 'var(--primary)' }} />
+              {activeSubTab === 'dotacion' ? 'Seleccionar Semana' : 'Seleccionar Fecha'}
+            </span>
+            {activeSubTab === 'dotacion' && (
+              <span style={{ fontSize: '0.72rem', color: '#0066ff', fontWeight: '600' }}>
+                Turno Miér - Mart
+              </span>
+            )}
+          </div>
           <DatePicker
+            inline={true}
             value={selectedDate}
             onChange={(val) => handleDateChange(val)}
             max={new Date().toISOString().split('T')[0]}
-            style={{ width: '180px' }}
+            rangeStart={activeSubTab === 'dotacion' ? activeWeekStart : undefined}
+            rangeEnd={activeSubTab === 'dotacion' ? activeWeekEnd : undefined}
+            style={{ width: '100%' }}
           />
         </div>
 
-        {/* Acceso Rápido a Días Pendientes (Opción 2) */}
-        <div ref={pendingMenuRef} className="filter-group" style={{ position: 'relative' }}>
-          <span className="filter-label">Estado del Mes</span>
-          <button
-            type="button"
-            onClick={() => setShowPendingMenu(prev => !prev)}
-            style={{
+        {/* Columna Derecha: Información y Controles */}
+        <div style={{ flex: '1 1 340px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* Fila superior: Fecha / Turno Activo y Estado del Mes */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
+            <div>
+              <span className="filter-label" style={{ display: 'block', marginBottom: '4px' }}>
+                {activeSubTab === 'dotacion' ? 'Turno Semanal Activo' : 'Fecha de Registro Activa'}
+              </span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                {activeSubTab === 'dotacion' ? (
+                  <div style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                    Semana del {formatDateDMY(activeWeekStart)} al {formatDateDMY(activeWeekEnd)}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '1.12rem', fontWeight: '700', color: 'var(--text-primary)', textTransform: 'capitalize' }}>
+                    {formatFullDate(selectedDate)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Acceso Rápido a Días Pendientes (Opción 2) */}
+            <div ref={pendingMenuRef} style={{ position: 'relative' }}>
+              <button
+                type="button"
+                onClick={() => setShowPendingMenu(prev => !prev)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 14px',
+                  borderRadius: '10px',
+                  border: missingDaysInfo.count > 0 
+                    ? '1px solid rgba(245, 158, 11, 0.4)' 
+                    : '1px solid rgba(16, 185, 129, 0.3)',
+                  background: missingDaysInfo.count > 0 
+                    ? 'rgba(245, 158, 11, 0.08)' 
+                    : 'rgba(16, 185, 129, 0.08)',
+                  color: missingDaysInfo.count > 0 ? '#f59e0b' : '#10b981',
+                  fontWeight: '600',
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  outline: 'none',
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                {missingDaysInfo.count > 0 ? (
+                  <>
+                    <AlertCircle size={15} />
+                    <span>{missingDaysInfo.count} {missingDaysInfo.count === 1 ? 'Día Pendiente' : 'Días Pendientes'}</span>
+                    <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>▼</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={15} />
+                    <span>Mes al día</span>
+                  </>
+                )}
+              </button>
+
+              {/* Menú desplegable de fechas pendientes */}
+              {showPendingMenu && missingDaysInfo.count > 0 && (
+                <div
+                  className="glass table-card"
+                  style={{
+                    position: 'absolute',
+                    top: 'calc(100% + 8px)',
+                    right: 0,
+                    zIndex: 1000,
+                    width: '320px',
+                    maxHeight: '340px',
+                    overflowY: 'auto',
+                    padding: '12px',
+                    borderRadius: '12px',
+                    boxShadow: '0 10px 30px -5px rgba(0,0,0,0.3)',
+                    animation: 'fadeIn 0.15s ease-out'
+                  }}
+                >
+                  <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>DÍAS SIN REGISTRO</span>
+                    <span>{missingDaysInfo.count} en total</span>
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {missingDaysInfo.missingDates.map(m => (
+                      <button
+                        key={m.dateStr}
+                        type="button"
+                        onClick={() => {
+                          setShowPendingMenu(false);
+                          handleDateChange(m.dateStr);
+                          if (m.missingEquipments) {
+                            handleSubTabChange('equipos');
+                          } else if (m.missingRaw) {
+                            handleSubTabChange('insumos');
+                          }
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '8px 10px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-color)',
+                          background: m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)',
+                          color: 'var(--text-primary)',
+                          cursor: 'pointer',
+                          fontSize: '0.82rem',
+                          textAlign: 'left',
+                          transition: 'all 0.15s ease'
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'}
+                        onMouseLeave={(e) => e.currentTarget.style.background = m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)'}
+                      >
+                        <div>
+                          <div style={{ fontWeight: '600', textTransform: 'capitalize' }}>{m.formatted}</div>
+                          <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginTop: '2px' }}>
+                            {m.detail}
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: '700' }}>Cargar →</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Fila de Badges de Estado del Registro */}
+          <div>
+            <span className="filter-label" style={{ display: 'block', marginBottom: '6px' }}>
+              Estado del Día Seleccionado ({formatDateDMY(selectedDate)})
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Equipos badge */}
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: '600',
+                background: isDateEquipmentsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
+                color: isDateEquipmentsSaved ? '#10b981' : '#ef4444',
+                border: isDateEquipmentsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+              }}>
+                {isDateEquipmentsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                <span>Equipos: {isDateEquipmentsSaved ? `Guardado (${savedEquipmentsCount})` : 'Sin registrar'}</span>
+              </span>
+
+              {/* Materias Primas badge */}
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: '600',
+                background: isDateRawMaterialsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
+                color: isDateRawMaterialsSaved ? '#10b981' : '#ef4444',
+                border: isDateRawMaterialsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
+              }}>
+                {isDateRawMaterialsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                <span>Materias Primas: {isDateRawMaterialsSaved ? 'Guardado' : 'Sin registrar'}</span>
+              </span>
+
+              {/* Dotación Semanal badge */}
+              <span style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                fontSize: '0.82rem',
+                fontWeight: '600',
+                background: isWeekRosterSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.1)',
+                color: isWeekRosterSaved ? '#10b981' : '#f59e0b',
+                border: isWeekRosterSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)'
+              }}>
+                {isWeekRosterSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
+                <span>Semana Dotación: {isWeekRosterSaved ? 'Guardada' : 'Pendiente'}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Controles contextuales según subtab activa */}
+          {activeSubTab === 'equipos' && (
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'flex-end', 
+              justifyContent: 'space-between', 
+              flexWrap: 'wrap', 
+              gap: '12px',
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-color)'
+            }}>
+              <div className="filter-group">
+                <span className="filter-label">Hora de Tronadura (24 hrs)</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <select
+                    disabled={isNoBlasting}
+                    value={blastingHour}
+                    onChange={(e) => {
+                      const h = parseInt(e.target.value, 10);
+                      const hStr = h < 10 ? `0${h}` : `${h}`;
+                      const mStr = blastingMin < 10 ? `0${blastingMin}` : `${blastingMin}`;
+                      handleBlastingTimeChange(`${hStr}:${mStr}`);
+                    }}
+                    style={{ width: '70px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
+                  >
+                    {hoursList.map(h => (
+                      <option key={h} value={h}>{h < 10 ? `0${h}` : `${h}`}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontWeight: 'bold', opacity: isNoBlasting ? 0.6 : 1 }}>:</span>
+                  <select
+                    disabled={isNoBlasting}
+                    value={blastingMin}
+                    onChange={(e) => {
+                      const m = parseInt(e.target.value, 10);
+                      const hStr = blastingHour < 10 ? `0${blastingHour}` : `${blastingHour}`;
+                      const mStr = m < 10 ? `0${m}` : `${m}`;
+                      handleBlastingTimeChange(`${hStr}:${mStr}`);
+                    }}
+                    style={{ width: '75px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
+                  >
+                    {Array.from({ length: 60 }, (_, i) => i).map(m => (
+                      <option key={m} value={m}>{m < 10 ? `0${m}` : `${m}`}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', opacity: isNoBlasting ? 0.6 : 1, marginRight: '8px' }}>hrs</span>
+                  
+                  {/* Sin Tronadura Selector */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.03)', padding: '6px 10px', borderRadius: '6px', userSelect: 'none' }}>
+                    <input
+                      type="checkbox"
+                      id="no-blasting-chk"
+                      checked={isNoBlasting}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setIsNoBlasting(checked);
+                        if (checked) {
+                          handleBlastingTimeChange('07:00');
+                        } else {
+                          handleBlastingTimeChange('19:00'); // default
+                        }
+                      }}
+                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                    />
+                    <label htmlFor="no-blasting-chk" style={{ fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                      Sin Tronadura
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              <button 
+                className="btn btn-secondary btn-sm" 
+                onClick={() => setShowEqSelector(!showEqSelector)}
+                style={{ height: '40px' }}
+              >
+                {showEqSelector ? 'Ocultar Selector de Equipos' : 'Seleccionar Equipos del Día'}
+              </button>
+            </div>
+          )}
+
+          {activeSubTab === 'dotacion' && (
+            <div style={{ 
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-color)',
               display: 'flex',
               alignItems: 'center',
               gap: '8px',
-              padding: '10px 14px',
-              borderRadius: '10px',
-              border: missingDaysInfo.count > 0 
-                ? '1px solid rgba(245, 158, 11, 0.4)' 
-                : '1px solid rgba(16, 185, 129, 0.3)',
-              background: missingDaysInfo.count > 0 
-                ? 'rgba(245, 158, 11, 0.08)' 
-                : 'rgba(16, 185, 129, 0.08)',
-              color: missingDaysInfo.count > 0 ? '#f59e0b' : '#10b981',
-              fontWeight: '600',
-              fontSize: '0.88rem',
-              height: '42px',
-              cursor: 'pointer',
-              outline: 'none',
-              transition: 'all 0.15s ease'
-            }}
-          >
-            {missingDaysInfo.count > 0 ? (
-              <>
-                <AlertCircle size={16} />
-                <span>{missingDaysInfo.count} {missingDaysInfo.count === 1 ? 'Día Pendiente' : 'Días Pendientes'}</span>
-                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>▼</span>
-              </>
-            ) : (
-              <>
-                <CheckCircle2 size={16} />
-                <span>Mes al día</span>
-              </>
-            )}
-          </button>
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)'
+            }}>
+              <Calendar size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+              <span>
+                El turno semanal rige de <strong>miércoles a martes</strong> (resaltado en azul en el calendario). Puede cambiar de semana seleccionando cualquier día.
+              </span>
+            </div>
+          )}
 
-          {/* Menú desplegable de fechas pendientes */}
-          {showPendingMenu && missingDaysInfo.count > 0 && (
-            <div
-              className="glass table-card"
-              style={{
-                position: 'absolute',
-                top: 'calc(100% + 8px)',
-                left: 0,
-                zIndex: 1000,
-                width: '320px',
-                maxHeight: '340px',
-                overflowY: 'auto',
-                padding: '12px',
-                borderRadius: '12px',
-                boxShadow: '0 10px 30px -5px rgba(0,0,0,0.3)',
-                animation: 'fadeIn 0.15s ease-out'
-              }}
-            >
-              <div style={{ fontSize: '0.78rem', fontWeight: '700', color: 'var(--text-secondary)', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between' }}>
-                <span>DÍAS SIN REGISTRO</span>
-                <span>{missingDaysInfo.count} en total</span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {missingDaysInfo.missingDates.map(m => (
-                  <button
-                    key={m.dateStr}
-                    type="button"
-                    onClick={() => {
-                      setShowPendingMenu(false);
-                      handleDateChange(m.dateStr);
-                      if (m.missingEquipments) {
-                        handleSubTabChange('equipos');
-                      } else if (m.missingRaw) {
-                        handleSubTabChange('insumos');
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '8px 10px',
-                      borderRadius: '8px',
-                      border: '1px solid var(--border-color)',
-                      background: m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer',
-                      fontSize: '0.82rem',
-                      textAlign: 'left',
-                      transition: 'all 0.15s ease'
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(245, 158, 11, 0.12)'}
-                    onMouseLeave={(e) => e.currentTarget.style.background = m.dateStr === selectedDate ? 'rgba(245, 158, 11, 0.15)' : 'var(--bg-card)'}
-                  >
-                    <div>
-                      <div style={{ fontWeight: '600', textTransform: 'capitalize' }}>{m.formatted}</div>
-                      <div style={{ fontSize: '0.72rem', color: '#f59e0b', marginTop: '2px' }}>
-                        {m.detail}
-                      </div>
-                    </div>
-                    <span style={{ fontSize: '0.75rem', color: 'var(--primary)', fontWeight: '700' }}>Cargar →</span>
-                  </button>
-                ))}
-              </div>
+          {activeSubTab === 'insumos' && (
+            <div style={{ 
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-color)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              fontSize: '0.85rem',
+              color: 'var(--text-secondary)'
+            }}>
+              <AlertCircle size={16} style={{ color: 'var(--primary)', flexShrink: 0 }} />
+              <span>
+                Registre el stock físico remanente al cierre del turno para Nitrato y Matriz del día seleccionado.
+              </span>
             </div>
           )}
         </div>
-
-        {/* Identificador y Estado de Registro del Día Seleccionado */}
-        <div className="filter-group" style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-          <span className="filter-label">Estado Registro {formatDateDMY(selectedDate)}</span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', height: '42px', flexWrap: 'wrap' }}>
-            {/* Equipos badge */}
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '0.82rem',
-              fontWeight: '600',
-              background: isDateEquipmentsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
-              color: isDateEquipmentsSaved ? '#10b981' : '#ef4444',
-              border: isDateEquipmentsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
-            }}>
-              {isDateEquipmentsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-              <span>Equipos: {isDateEquipmentsSaved ? `Guardado (${savedEquipmentsCount})` : 'Sin registrar'}</span>
-            </span>
-
-            {/* Materias Primas badge */}
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '0.82rem',
-              fontWeight: '600',
-              background: isDateRawMaterialsSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.1)',
-              color: isDateRawMaterialsSaved ? '#10b981' : '#ef4444',
-              border: isDateRawMaterialsSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(239, 68, 68, 0.25)'
-            }}>
-              {isDateRawMaterialsSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-              <span>Materias Primas: {isDateRawMaterialsSaved ? 'Guardado' : 'Sin registrar'}</span>
-            </span>
-
-            {/* Dotación Semanal badge */}
-            <span style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              fontSize: '0.82rem',
-              fontWeight: '600',
-              background: isWeekRosterSaved ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.1)',
-              color: isWeekRosterSaved ? '#10b981' : '#f59e0b',
-              border: isWeekRosterSaved ? '1px solid rgba(16, 185, 129, 0.3)' : '1px solid rgba(245, 158, 11, 0.25)'
-            }}>
-              {isWeekRosterSaved ? <CheckCircle2 size={14} /> : <AlertCircle size={14} />}
-              <span>Semana: {isWeekRosterSaved ? 'Dotación Guardada' : 'Dotación Pendiente'}</span>
-            </span>
-          </div>
-        </div>
-
-        {activeSubTab === 'equipos' && (
-          <>
-            <div className="filter-group">
-              <span className="filter-label">Hora de Tronadura (24 hrs)</span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <select
-                  disabled={isNoBlasting}
-                  value={blastingHour}
-                  onChange={(e) => {
-                    const h = parseInt(e.target.value, 10);
-                    const hStr = h < 10 ? `0${h}` : `${h}`;
-                    const mStr = blastingMin < 10 ? `0${blastingMin}` : `${blastingMin}`;
-                    handleBlastingTimeChange(`${hStr}:${mStr}`);
-                  }}
-                  style={{ width: '70px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
-                >
-                  {hoursList.map(h => (
-                    <option key={h} value={h}>{h < 10 ? `0${h}` : `${h}`}</option>
-                  ))}
-                </select>
-                <span style={{ fontWeight: 'bold', opacity: isNoBlasting ? 0.6 : 1 }}>:</span>
-                <select
-                  disabled={isNoBlasting}
-                  value={blastingMin}
-                  onChange={(e) => {
-                    const m = parseInt(e.target.value, 10);
-                    const hStr = blastingHour < 10 ? `0${blastingHour}` : `${blastingHour}`;
-                    const mStr = m < 10 ? `0${m}` : `${m}`;
-                    handleBlastingTimeChange(`${hStr}:${mStr}`);
-                  }}
-                  style={{ width: '75px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
-                >
-                  {Array.from({ length: 60 }, (_, i) => i).map(m => (
-                    <option key={m} value={m}>{m < 10 ? `0${m}` : `${m}`}</option>
-                  ))}
-                </select>
-                <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', opacity: isNoBlasting ? 0.6 : 1, marginRight: '8px' }}>hrs</span>
-                
-                {/* Sin Tronadura Selector */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.03)', padding: '6px 10px', borderRadius: '6px', userSelect: 'none' }}>
-                  <input
-                    type="checkbox"
-                    id="no-blasting-chk"
-                    checked={isNoBlasting}
-                    onChange={(e) => {
-                      const checked = e.target.checked;
-                      setIsNoBlasting(checked);
-                      if (checked) {
-                        handleBlastingTimeChange('07:00');
-                      } else {
-                        handleBlastingTimeChange('19:00'); // default
-                      }
-                    }}
-                    style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                  />
-                  <label htmlFor="no-blasting-chk" style={{ fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                    Sin Tronadura
-                  </label>
-                </div>
-              </div>
-            </div>
-
-            <button 
-              className="btn btn-secondary btn-sm" 
-              onClick={() => setShowEqSelector(!showEqSelector)}
-              style={{ alignSelf: 'flex-end', height: '40px' }}
-            >
-              {showEqSelector ? 'Ocultar Selector de Equipos' : 'Seleccionar Equipos del Día'}
-            </button>
-          </>
-        )}
-
-        {activeSubTab === 'dotacion' && (
-          <div className="filter-group">
-            <span className="filter-label">Turno Semanal Activo (Miércoles a Martes)</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Calendar size={18} className="text-secondary" />
-              <strong style={{ fontSize: '0.9rem' }}>Semana del miércoles {formatDateDMY(activeWeekStart)} al martes {formatDateDMY(weekDays[6]?.dateStr)}</strong>
-            </div>
-          </div>
-        )}
-
-        {activeSubTab === 'equipos' && (
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
-            <AlertCircle size={16} style={{ color: 'var(--color-mantencioncorrectiva)' }} />
-            <span>Fallas después de tronadura ({blastingTime} hrs) no restan disponibilidad.</span>
-          </div>
-        )}
       </div>
 
       {/* Tabs Menu Navigation (Phase 17: removed 'calidad') */}
@@ -1288,7 +1370,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                           comment: ''
                         };
 
-                        const availHours = getAvailHours(state, blastingTime);
+                        const availHours = getAvailHours(state);
 
                         return (
                           <tr key={eq.id}>

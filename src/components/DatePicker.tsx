@@ -9,6 +9,7 @@ interface DatePickerProps {
   style?: React.CSSProperties;
   rangeStart?: string; // Optional: start date of selected range
   rangeEnd?: string;   // Optional: end date of selected range
+  inline?: boolean;    // Optional: render calendar inline (always visible)
 }
 
 const MONTH_NAMES_ES = [
@@ -49,7 +50,8 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   max, 
   style,
   rangeStart,
-  rangeEnd
+  rangeEnd,
+  inline = false
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   
@@ -69,8 +71,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     }
   }, [value]);
 
-  // Click outside listener
+  // Click outside listener (only for popover mode)
   useEffect(() => {
+    if (inline) return;
     const handleClickOutside = (event: MouseEvent) => {
       if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
@@ -80,7 +83,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [isOpen]);
+  }, [isOpen, inline]);
 
   const year = currentMonth.getFullYear();
   const monthIdx = currentMonth.getMonth();
@@ -137,7 +140,9 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     e.stopPropagation();
     const ymd = toYYYYMMDD(date);
     onChange(ymd);
-    setIsOpen(false);
+    if (!inline) {
+      setIsOpen(false);
+    }
   };
 
   const isToday = (date: Date) => {
@@ -171,6 +176,251 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     }
     return false;
   };
+
+  const renderCalendarBody = () => (
+    <>
+      {/* Calendar Header with Arrows on the Right */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          marginBottom: '14px',
+          paddingLeft: '4px',
+          paddingRight: '4px'
+        }}
+      >
+        <span
+          style={{
+            fontWeight: '700',
+            fontSize: '0.95rem',
+            color: 'var(--text-primary)',
+            textTransform: 'capitalize'
+          }}
+        >
+          {MONTH_NAMES_ES[monthIdx]} {year}
+        </span>
+
+        <div style={{ display: 'flex', gap: '6px' }}>
+          <button
+            type="button"
+            onClick={handlePrevMonth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '28px',
+              height: '28px',
+              border: 'none',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              transition: 'background 0.15s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+          >
+            <ChevronLeft size={16} />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleNextMonth}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: '28px',
+              height: '28px',
+              border: 'none',
+              borderRadius: '6px',
+              background: 'rgba(255, 255, 255, 0.05)',
+              color: 'var(--text-primary)',
+              cursor: 'pointer',
+              transition: 'background 0.15s ease'
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
+            onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
+          >
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Weekday Names */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          textAlign: 'center',
+          marginBottom: '8px'
+        }}
+      >
+        {WEEKDAYS_ES.map((day, idx) => (
+          <span
+            key={`${day}-${idx}`}
+            style={{
+              fontSize: '0.75rem',
+              fontWeight: '600',
+              color: 'var(--text-muted)',
+              padding: '2px 0',
+              opacity: 0.6
+            }}
+          >
+            {day}
+          </span>
+        ))}
+      </div>
+
+      {/* Days Grid */}
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(7, 1fr)',
+          rowGap: '4px',
+          textAlign: 'center'
+        }}
+      >
+        {gridCells.map(({ day, dateObj, isCurrentMonth }, idx) => {
+          const disabled = isDisabled(dateObj);
+          const active = isSelected(dateObj);
+          const today = isToday(dateObj);
+          
+          const time = dateObj.getTime();
+          const isStart = rangeStartTime !== null && time === rangeStartTime;
+          const isEnd = rangeEndTime !== null && time === rangeEndTime;
+          const isInRange = rangeStartTime !== null && rangeEndTime !== null && time > rangeStartTime && time < rangeEndTime;
+
+          let cellStyle: React.CSSProperties = {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: '32px',
+            fontSize: '0.84rem',
+            fontWeight: '600',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            position: 'relative',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            width: '100%'
+          };
+
+          if (isStart && isEnd) {
+            cellStyle = {
+              ...cellStyle,
+              background: '#0066ff',
+              color: '#ffffff',
+              borderRadius: '8px'
+            };
+          } else if (isStart) {
+            cellStyle = {
+              ...cellStyle,
+              background: '#0066ff',
+              color: '#ffffff',
+              borderRadius: '8px 0 0 8px'
+            };
+          } else if (isEnd) {
+            cellStyle = {
+              ...cellStyle,
+              background: '#0066ff',
+              color: '#ffffff',
+              borderRadius: '0 8px 8px 0'
+            };
+          } else if (isInRange) {
+            cellStyle = {
+              ...cellStyle,
+              background: 'rgba(0, 102, 255, 0.16)',
+              color: 'var(--text-primary)',
+              borderRadius: '0px'
+            };
+          } else if (active) {
+            cellStyle = {
+              ...cellStyle,
+              background: '#0066ff',
+              color: '#ffffff',
+              borderRadius: '8px'
+            };
+          } else if (disabled) {
+            cellStyle = {
+              ...cellStyle,
+              opacity: 0.25,
+              pointerEvents: 'none',
+              color: 'var(--text-muted)'
+            };
+          } else if (!isCurrentMonth) {
+            cellStyle = {
+              ...cellStyle,
+              color: 'var(--text-muted)',
+              opacity: 0.35
+            };
+          } else {
+            cellStyle = {
+              ...cellStyle,
+              color: 'var(--text-primary)'
+            };
+          }
+
+          const showTodayRing = today && !active && !isStart && !isEnd && !isInRange;
+
+          if (showTodayRing) {
+            cellStyle = {
+              ...cellStyle,
+              border: '1.5px solid #0066ff',
+              borderRadius: '8px'
+            };
+          }
+
+          return (
+            <button
+              key={`${dateObj.getTime()}-${idx}`}
+              type="button"
+              disabled={disabled}
+              onClick={(e) => handleSelectDay(dateObj, e)}
+              style={cellStyle}
+              className="calendar-day-btn"
+              onMouseEnter={(e) => {
+                if (!active && !disabled && !isStart && !isEnd && !isInRange) {
+                  e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                  e.currentTarget.style.borderRadius = '8px';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (!active && !disabled && !isStart && !isEnd && !isInRange) {
+                  e.currentTarget.style.background = 'transparent';
+                }
+              }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+
+  if (inline) {
+    return (
+      <div 
+        ref={containerRef} 
+        style={{ 
+          display: 'block',
+          width: '290px',
+          padding: '14px',
+          borderRadius: '12px',
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          userSelect: 'none',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+          ...style 
+        }}
+      >
+        {renderCalendarBody()}
+      </div>
+    );
+  }
 
   return (
     <div 
@@ -229,227 +479,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             userSelect: 'none'
           }}
         >
-          {/* Calendar Header with Arrows on the Right (exactly like the image) */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: '16px',
-              paddingLeft: '4px',
-              paddingRight: '4px'
-            }}
-          >
-            <span
-              style={{
-                fontWeight: '700',
-                fontSize: '1rem',
-                color: 'var(--text-primary)',
-                textTransform: 'capitalize'
-              }}
-            >
-              {MONTH_NAMES_ES[monthIdx]} {year}
-            </span>
-
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                onClick={handlePrevMonth}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '30px',
-                  height: '30px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  transition: 'background 0.15s ease'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
-              >
-                <ChevronLeft size={16} />
-              </button>
-
-              <button
-                type="button"
-                onClick={handleNextMonth}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: '30px',
-                  height: '30px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  color: 'var(--text-primary)',
-                  cursor: 'pointer',
-                  transition: 'background 0.15s ease'
-                }}
-                onMouseEnter={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'}
-                onMouseLeave={(e) => e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)'}
-              >
-                <ChevronRight size={16} />
-              </button>
-            </div>
-          </div>
-
-          {/* Weekday Names (Ultra-clean single letter format) */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, 1fr)',
-              textAlign: 'center',
-              marginBottom: '10px'
-            }}
-          >
-            {WEEKDAYS_ES.map((day, idx) => (
-              <span
-                key={`${day}-${idx}`}
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: '600',
-                  color: 'var(--text-muted)',
-                  padding: '4px 0',
-                  opacity: 0.6
-                }}
-              >
-                {day}
-              </span>
-            ))}
-          </div>
-
-          {/* Days Grid */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(7, 1fr)',
-              rowGap: '6px',
-              textAlign: 'center'
-            }}
-          >
-            {gridCells.map(({ day, dateObj, isCurrentMonth }, idx) => {
-              const disabled = isDisabled(dateObj);
-              const active = isSelected(dateObj);
-              const today = isToday(dateObj);
-              
-              const time = dateObj.getTime();
-              const isStart = rangeStartTime !== null && time === rangeStartTime;
-              const isEnd = rangeEndTime !== null && time === rangeEndTime;
-              const isInRange = rangeStartTime !== null && rangeEndTime !== null && time > rangeStartTime && time < rangeEndTime;
-
-              let cellStyle: React.CSSProperties = {
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '34px',
-                fontSize: '0.85rem',
-                fontWeight: '600',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                position: 'relative',
-                background: 'transparent',
-                border: 'none',
-                outline: 'none',
-                width: '100%'
-              };
-
-              // Apply range selection styles (matching the pill design in the image)
-              if (isStart && isEnd) {
-                cellStyle = {
-                  ...cellStyle,
-                  background: '#0066ff',
-                  color: '#ffffff',
-                  borderRadius: '10px'
-                };
-              } else if (isStart) {
-                cellStyle = {
-                  ...cellStyle,
-                  background: '#0066ff',
-                  color: '#ffffff',
-                  borderRadius: '10px 0 0 10px'
-                };
-              } else if (isEnd) {
-                cellStyle = {
-                  ...cellStyle,
-                  background: '#0066ff',
-                  color: '#ffffff',
-                  borderRadius: '0 10px 10px 0'
-                };
-              } else if (isInRange) {
-                cellStyle = {
-                  ...cellStyle,
-                  background: 'rgba(0, 102, 255, 0.15)',
-                  color: 'var(--text-primary)',
-                  borderRadius: '0px'
-                };
-              } else if (active) {
-                cellStyle = {
-                  ...cellStyle,
-                  background: '#0066ff',
-                  color: '#ffffff',
-                  borderRadius: '10px'
-                };
-              } else if (disabled) {
-                cellStyle = {
-                  ...cellStyle,
-                  opacity: 0.2,
-                  pointerEvents: 'none',
-                  color: 'var(--text-muted)'
-                };
-              } else if (!isCurrentMonth) {
-                cellStyle = {
-                  ...cellStyle,
-                  color: 'var(--text-muted)',
-                  opacity: 0.4
-                };
-              } else {
-                cellStyle = {
-                  ...cellStyle,
-                  color: 'var(--text-primary)'
-                };
-              }
-
-              // Blue border loop if it's today and not highlighted inside a selection
-              const showTodayRing = today && !active && !isStart && !isEnd && !isInRange;
-
-              if (showTodayRing) {
-                cellStyle = {
-                  ...cellStyle,
-                  border: '1.5px solid #0066ff',
-                  borderRadius: '10px'
-                };
-              }
-
-              return (
-                <button
-                  key={`${dateObj.getTime()}-${idx}`}
-                  type="button"
-                  disabled={disabled}
-                  onClick={(e) => handleSelectDay(dateObj, e)}
-                  style={cellStyle}
-                  className="calendar-day-btn"
-                  onMouseEnter={(e) => {
-                    if (!active && !disabled && !isStart && !isEnd && !isInRange) {
-                      e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)';
-                      e.currentTarget.style.borderRadius = '10px';
-                    }
-                  }}
-                  onMouseLeave={(e) => {
-                    if (!active && !disabled && !isStart && !isEnd && !isInRange) {
-                      e.currentTarget.style.background = 'transparent';
-                    }
-                  }}
-                >
-                  {day}
-                </button>
-              );
-            })}
-          </div>
+          {renderCalendarBody()}
         </div>
       )}
     </div>

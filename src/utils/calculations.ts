@@ -74,7 +74,8 @@ interface Interval {
 
 export const calculateTypeDailyHours = (
   requiredCount: number,
-  records: AvailabilityRecord[]
+  records: AvailabilityRecord[],
+  totalFleetCount?: number
 ): {
   contractDelivered: number;
   contractTarget: number;
@@ -82,7 +83,7 @@ export const calculateTypeDailyHours = (
   uncoveredDown: number;
 } => {
   const contractTarget = requiredCount * 12;
-  const N = records.length;
+  const N = totalFleetCount !== undefined ? Math.max(records.length, totalFleetCount) : records.length;
   
   if (N === 0) {
     return {
@@ -258,7 +259,7 @@ export const calculateMetrics = (
 
       dayPhysicalDelivered += typeDayAvailableHours;
 
-      const dayHours = calculateTypeDailyHours(required, typeRecords);
+      const dayHours = calculateTypeDailyHours(required, typeRecords, fleetSize);
       
       dayContractTarget += dayHours.contractTarget;
       dayContractDelivered += dayHours.contractDelivered;
@@ -296,7 +297,7 @@ export const calculateMetrics = (
         return eq?.type === t;
       });
       
-      const dayHours = calculateTypeDailyHours(required, typeRecords);
+      const dayHours = calculateTypeDailyHours(required, typeRecords, typeEqList.length);
       totalCappedContractHours += dayHours.contractDelivered;
     });
 

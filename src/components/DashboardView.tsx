@@ -479,7 +479,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
           return eq?.type === t;
         });
 
-        const dayHours = calculateTypeDailyHours(req, typeRecords);
+        const fleetCount = fleet.filter(f => f.type === t).length;
+        const dayHours = calculateTypeDailyHours(req, typeRecords, fleetCount);
         sum += dayHours.contractDelivered;
       });
     });
@@ -594,39 +595,77 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
   }, [fleet, ganttFilterType]);
 
   const ganttStats = useMemo(() => {
-    const trucks = fleet.filter(e => e.type === 'Camión Fábrica');
-    const recs = ganttDayRecords.filter(r => trucks.some(t => t.id === r.equipmentId));
+    const isTrucksOnly = ganttFilterType === 'trucks';
+    const targetEquipments = isTrucksOnly ? fleet.filter(e => e.type === 'Camión Fábrica') : fleet;
+    const recs = ganttDayRecords.filter(r => targetEquipments.some(t => t.id === r.equipmentId));
     
-    let totalAvail = 0;
-    let totalDown = 0;
+    let totalPhysicalAvail = 0;
+    let totalPhysicalDown = 0;
     let count100 = 0;
     let countFailing = 0;
 
-    trucks.forEach(t => {
+    targetEquipments.forEach(t => {
       const rec = recs.find(r => r.equipmentId === t.id);
       if (!rec || rec.status === 'Operativo') {
-        totalAvail += 12;
+        totalPhysicalAvail += 12;
         count100 += 1;
       } else {
         const down = rec.endHour - rec.startHour;
-        totalDown += down;
-        totalAvail += Math.max(0, 12 - down);
+        totalPhysicalDown += down;
+        totalPhysicalAvail += Math.max(0, 12 - down);
         countFailing += 1;
       }
     });
 
-    const totalPossible = trucks.length * 12;
-    const dailyPct = totalPossible > 0 ? (totalAvail / totalPossible) * 100 : 100;
+    let contractTarget = 0;
+    let contractDelivered = 0;
+    let backupCoveredHours = 0;
+    let uncoveredDownHours = 0;
+
+    const typesToCompute: Equipment['type'][] = isTrucksOnly 
+      ? ['Camión Fábrica'] 
+      : ['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'];
+
+    typesToCompute.forEach(t => {
+      const req = t === 'Camión Fábrica' ? settings.requiredFactoryTrucks
+                : t === 'Cargador Frontal' ? settings.requiredFrontLoaders
+                : t === 'Polvorín Móvil' ? settings.requiredPowderKegs
+                : settings.requiredPickups;
+      
+      const typeEquipment = fleet.filter(eq => eq.type === t);
+      const typeRecs = recs.filter(r => typeEquipment.some(eq => eq.id === r.equipmentId));
+      
+      const dayHours = calculateTypeDailyHours(req, typeRecs, typeEquipment.length);
+      contractTarget += dayHours.contractTarget;
+      contractDelivered += dayHours.contractDelivered;
+      backupCoveredHours += dayHours.backupCovered;
+      uncoveredDownHours += dayHours.uncoveredDown;
+    });
+
+    const contractualPct = contractTarget > 0 ? (contractDelivered / contractTarget) * 100 : 100;
+    const totalPhysicalPossible = targetEquipments.length * 12;
+    const physicalPct = totalPhysicalPossible > 0 ? (totalPhysicalAvail / totalPhysicalPossible) * 100 : 100;
+
+    const requiredUnits = isTrucksOnly 
+      ? settings.requiredFactoryTrucks 
+      : (settings.requiredFactoryTrucks + settings.requiredFrontLoaders + settings.requiredPowderKegs + settings.requiredPickups);
 
     return {
-      totalTrucks: trucks.length,
+      totalEquipments: targetEquipments.length,
+      totalTrucks: targetEquipments.length,
+      requiredUnits,
       count100,
       countFailing,
-      totalDown,
-      dailyPct,
+      totalDown: totalPhysicalDown,
+      contractTarget,
+      contractDelivered,
+      backupCoveredHours,
+      uncoveredDownHours,
+      dailyPct: contractualPct,
+      physicalPct,
       hasRecords: recs.length > 0
     };
-  }, [fleet, ganttDayRecords]);
+  }, [fleet, ganttDayRecords, ganttFilterType, settings]);
 
   // Calendar cells for the Filtered Dates Gantt Calendar Card (Phase 35)
   const ganttCalendarCells = useMemo(() => {
@@ -680,25 +719,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
       return { hasRecords: false, pct: 100, downHours: 0 };
     }
 
-    let totalAvail = 0;
-    let totalDown = 0;
+    const req = settings.requiredFactoryTrucks;
+    const dayHours = calculateTypeDailyHours(req, truckRecs, trucks.length);
+    const contractualPct = dayHours.contractTarget > 0 
+      ? (dayHours.contractDelivered / dayHours.contractTarget) * 100 
+      : 100;
 
-    trucks.forEach(t => {
-      const rec = truckRecs.find(r => r.equipmentId === t.id);
-      if (!rec || rec.status === 'Operativo') {
-        totalAvail += 12;
-      } else {
-        const down = rec.endHour - rec.startHour;
-        totalDown += down;
-        totalAvail += Math.max(0, 12 - down);
-      }
-    });
-
-    const totalPossible = trucks.length * 12;
-    const pct = totalPossible > 0 ? (totalAvail / totalPossible) * 100 : 100;
-
-    return { hasRecords: true, pct, downHours: totalDown };
-  }, [fleet, records]);
+    return { 
+      hasRecords: true, 
+      pct: contractualPct, 
+      downHours: dayHours.uncoveredDown,
+      backupCovered: dayHours.backupCovered 
+    };
+  }, [fleet, records, settings]);
 
   // Re-organize records by date for raw materials & attendance stats
   const recordsByDate = useMemo(() => {
@@ -2807,35 +2840,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
             {/* Tarjetas Resumen del Día */}
             <div style={{ 
               display: 'grid', 
-              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', 
               gap: '14px', 
               marginBottom: '22px' 
             }}>
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Camiones Fábrica</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  {ganttFilterType === 'trucks' ? 'Flota Camiones Fábrica' : 'Flota Total de Equipos'}
+                </span>
                 <div style={{ fontSize: '1.4rem', fontWeight: '700', color: 'var(--text-primary)', marginTop: '2px' }}>
-                  {ganttStats.totalTrucks} unidades
+                  {ganttStats.totalEquipments} unidades
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--primary)', marginTop: '3px', fontWeight: '600' }}>
+                  Contrato exige: {ganttStats.requiredUnits} {ganttStats.requiredUnits === 1 ? 'unidad' : 'unidades'}
                 </div>
               </div>
 
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>100% Operativos</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Operativos 12 hrs
+                </span>
                 <div style={{ fontSize: '1.4rem', fontWeight: '700', color: '#10b981', marginTop: '2px' }}>
-                  {ganttStats.count100} de {ganttStats.totalTrucks}
+                  {ganttStats.count100} de {ganttStats.totalEquipments}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: ganttStats.count100 >= ganttStats.requiredUnits ? '#10b981' : 'var(--text-muted)', marginTop: '3px' }}>
+                  {ganttStats.count100 >= ganttStats.requiredUnits ? '✓ Cumple exigencia en jornada' : `${ganttStats.count100} equipos sin detenciones`}
                 </div>
               </div>
 
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Con Inactividad / Falla</span>
-                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: ganttStats.countFailing > 0 ? '#ef4444' : 'var(--text-muted)', marginTop: '2px' }}>
-                  {ganttStats.countFailing} {ganttStats.countFailing === 1 ? 'camión' : 'camiones'}
+                <span style={{ fontSize: '0.74rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Con Falla / Detención
+                </span>
+                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: ganttStats.countFailing > 0 ? (ganttStats.uncoveredDownHours > 0 ? '#ef4444' : '#f59e0b') : 'var(--text-muted)', marginTop: '2px' }}>
+                  {ganttStats.countFailing} {ganttStats.countFailing === 1 ? 'equipo' : 'equipos'}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: ganttStats.countFailing === 0 ? '#10b981' : (ganttStats.uncoveredDownHours === 0 ? '#10b981' : '#ef4444'), marginTop: '3px' }}>
+                  {ganttStats.countFailing === 0 
+                    ? '✓ Sin fallas registradas' 
+                    : (ganttStats.uncoveredDownHours === 0 
+                        ? '✓ Cubiertos por flota de respaldo' 
+                        : `⚠ ${ganttStats.uncoveredDownHours} hrs no cubiertas`)}
                 </div>
               </div>
 
               <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
-                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Disponibilidad del Día</span>
+                <span style={{ fontSize: '0.74rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  Disponibilidad Contractual
+                </span>
                 <div style={{ fontSize: '1.4rem', fontWeight: '700', color: ganttStats.dailyPct >= 95 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
                   {ganttStats.dailyPct.toFixed(1)}%
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                  {ganttStats.contractDelivered.toFixed(0)} / {ganttStats.contractTarget} hrs requeridas
                 </div>
               </div>
             </div>
@@ -3024,6 +3081,92 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     );
                   })}
                 </tbody>
+                <tfoot>
+                  <tr style={{ background: 'rgba(255, 255, 255, 0.04)', borderTop: '2px solid var(--border-color)', fontWeight: '700' }}>
+                    <td style={{ padding: '12px', fontSize: '0.85rem' }}>
+                      <div style={{ color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span>Flota Operativa en Turno</span>
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 'normal' }}>
+                        {ganttFilterType === 'trucks' ? 'Camiones operativos por hora' : 'Equipos operativos por hora'}
+                      </div>
+                    </td>
+
+                    <td style={{ textAlign: 'center', padding: '12px 8px', fontSize: '0.78rem' }}>
+                      <span style={{ 
+                        padding: '2px 8px', 
+                        borderRadius: '4px', 
+                        background: 'rgba(0, 102, 255, 0.12)', 
+                        color: 'var(--primary)',
+                        fontWeight: '700'
+                      }}>
+                        Meta: {ganttStats.requiredUnits}
+                      </span>
+                    </td>
+
+                    {/* Cumplimiento para cada una de las 12 horas */}
+                    {GANTT_HOURS.map(h => {
+                      let opCount = 0;
+                      ganttEquipments.forEach(eq => {
+                        const rec = ganttDayRecords.find(r => r.equipmentId === eq.id);
+                        if (!rec || rec.status === 'Operativo') {
+                          opCount++;
+                        } else {
+                          const isDown = h >= rec.startHour && h < rec.endHour;
+                          if (!isDown) opCount++;
+                        }
+                      });
+                      const isBlastHour = ganttBlastingTime !== '07:00' && parseInt(ganttBlastingTime.split(':')[0], 10) === h;
+                      const isCompliant = opCount >= ganttStats.requiredUnits;
+
+                      return (
+                        <td 
+                          key={`foot-${h}`}
+                          style={{ 
+                            padding: '8px 2px', 
+                            textAlign: 'center',
+                            background: isBlastHour ? 'rgba(245, 158, 11, 0.08)' : undefined
+                          }}
+                          title={`Hora ${h < 10 ? `0${h}` : h}:00 - ${opCount} operativos (Meta: ${ganttStats.requiredUnits})`}
+                        >
+                          <div style={{
+                            fontSize: '0.78rem',
+                            fontWeight: '800',
+                            color: isCompliant ? '#10b981' : '#ef4444',
+                            background: isCompliant ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.15)',
+                            borderRadius: '4px',
+                            padding: '3px 0'
+                          }}>
+                            {opCount}
+                          </div>
+                        </td>
+                      );
+                    })}
+
+                    {/* Total Horas Contractuales Entregadas vs Meta */}
+                    <td style={{ textAlign: 'center', padding: '12px 8px' }}>
+                      <div style={{ fontWeight: '800', fontSize: '0.88rem', color: ganttStats.dailyPct >= 95 ? '#10b981' : '#ef4444' }}>
+                        {ganttStats.contractDelivered.toFixed(0)} / {ganttStats.contractTarget} hrs
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                        Meta contractual
+                      </div>
+                    </td>
+
+                    {/* Resumen de Cumplimiento Contractual */}
+                    <td style={{ padding: '12px', fontSize: '0.82rem' }}>
+                      {ganttStats.dailyPct >= 100 ? (
+                        <span style={{ color: '#10b981', fontWeight: '700' }}>
+                          ✓ 100% Cumplimiento Contractual {ganttStats.backupCoveredHours > 0 ? `(${ganttStats.backupCoveredHours} hrs cubiertas por respaldo)` : ''}
+                        </span>
+                      ) : (
+                        <span style={{ color: '#ef4444', fontWeight: '700' }}>
+                          ⚠ Pérdida de {ganttStats.uncoveredDownHours} hrs contractuales ({ganttStats.dailyPct.toFixed(1)}% disp.)
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
 

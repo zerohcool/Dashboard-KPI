@@ -844,7 +844,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
           display: 'flex', 
           flexDirection: 'row', 
           gap: '24px', 
-          alignItems: 'flex-start', 
+          alignItems: 'stretch', 
           padding: '20px', 
           marginBottom: '24px',
           position: 'relative', 
@@ -877,7 +877,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
         </div>
 
         {/* Columna Derecha: Información y Controles */}
-        <div style={{ flex: '1 1 340px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ flex: '1 1 340px', display: 'flex', flexDirection: 'column', gap: '14px', justifyContent: 'space-between' }}>
           {/* Fila superior: Fecha / Turno Activo y Estado del Mes */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
             <div>
@@ -1095,7 +1095,8 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
               flexDirection: 'column',
               gap: '12px',
               paddingTop: '12px',
-              borderTop: '1px solid var(--border-color)'
+              borderTop: '1px solid var(--border-color)',
+              flex: 1
             }}>
               <div style={{ 
                 display: 'flex', 
@@ -1173,7 +1174,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                 </button>
               </div>
 
-              {/* Input Observaciones Horario de Tronadura */}
+              {/* Textarea Multilínea de Observaciones Horario de Tronadura */}
               <div style={{ 
                 display: 'flex', 
                 flexDirection: 'column', 
@@ -1181,7 +1182,8 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                 background: 'rgba(255, 255, 255, 0.03)',
                 padding: '10px 12px',
                 borderRadius: '8px',
-                border: '1px solid var(--border-color)'
+                border: '1px solid var(--border-color)',
+                flex: 1
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
                   <label htmlFor="blasting-obs-input" className="filter-label" style={{ marginBottom: 0 }}>
@@ -1191,9 +1193,9 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                     (Cumplimiento, causas de retraso o alteraciones)
                   </span>
                 </div>
-                <input
+                <textarea
                   id="blasting-obs-input"
-                  type="text"
+                  rows={3}
                   value={blastingObservations}
                   onChange={(e) => {
                     setBlastingObservations(e.target.value);
@@ -1202,12 +1204,17 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                   placeholder="Ej: Tronadura efectuada en horario programado sin novedades / Retraso de 20 min por despeje de área..."
                   style={{
                     width: '100%',
+                    flex: 1,
+                    minHeight: '72px',
+                    resize: 'vertical',
                     padding: '8px 12px',
                     fontSize: '0.85rem',
                     borderRadius: '6px',
                     background: 'var(--bg-input)',
                     border: '1px solid var(--border-input)',
-                    color: 'var(--text-input)'
+                    color: 'var(--text-input)',
+                    fontFamily: 'inherit',
+                    lineHeight: 1.45
                   }}
                 />
               </div>

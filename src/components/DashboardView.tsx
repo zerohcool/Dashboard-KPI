@@ -9,11 +9,12 @@ import {
   BarChart, Bar, Cell, PieChart, Pie, ReferenceLine
 } from 'recharts';
 import { 
-  Download, FileDown, Clock, X, AlertTriangle, Award, Save, Layers, Users 
+  Download, FileDown, Clock, X, AlertTriangle, Award, Save, Layers, Users,
+  Calendar, ChevronLeft, ChevronRight, Zap, Truck
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { DatePicker } from './DatePicker';
+import { DatePicker, getShiftForDate } from './DatePicker';
 
 const SAFETY_KPI_DESCRIPTIONS: Record<string, { title: string; desc: string }> = {
   'kpi-seg-trirf': {
@@ -60,6 +61,40 @@ const formatToDDMMYYYY = (dateStr: string) => {
   return dateStr;
 };
 
+const formatFullDateEs = (dateStr: string): string => {
+  if (!dateStr) return '';
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return dateStr;
+  const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+  return d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+};
+
+const MONTH_NAMES_ES = [
+  'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+  'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+];
+
+const WEEKDAYS_SHORT_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+
+const GANTT_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
+
+const getGanttStatusColor = (status: string) => {
+  switch (status) {
+    case 'Operativo':
+      return '#10b981';
+    case 'Mantención Correctiva':
+      return '#ef4444';
+    case 'Mantención Preventiva':
+      return '#3b82f6';
+    case 'Mantención Programada':
+      return '#f59e0b';
+    case 'Mantención Predictiva':
+      return '#8b5cf6';
+    default:
+      return 'rgba(255, 255, 255, 0.1)';
+  }
+};
+
 export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, syncVersion }) => {
   const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
   
@@ -76,6 +111,27 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
   const [modalEqId, setModalEqId] = useState<string | null>(null);
   const [selectedRoleForModal, setSelectedRoleForModal] = useState<string | null>(null);
   const [hoveredKpiId, setHoveredKpiId] = useState<string | null>(null);
+
+  // States for Gantt Chart & Filtered Dates Calendar (Phase 35)
+  const [selectedGanttDate, setSelectedGanttDate] = useState<string | null>(null);
+  const [ganttFilterType, setGanttFilterType] = useState<'trucks' | 'all'>('trucks');
+  const [ganttCalDate, setGanttCalDate] = useState<Date>(() => {
+    if (endDate) {
+      const parts = endDate.split('-');
+      if (parts.length === 3) return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1);
+    }
+    return new Date();
+  });
+
+  // Sync calendar month if range changes
+  useEffect(() => {
+    if (endDate) {
+      const parts = endDate.split('-');
+      if (parts.length === 3) {
+        setGanttCalDate(new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, 1));
+      }
+    }
+  }, [endDate]);
   
   const getQualityKPIState = (kpiId: string) => {
     if (periodCompliancesState[kpiId]) {
@@ -507,6 +563,143 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                   .sort((a, b) => b.date.localeCompare(a.date));
   }, [fleetSummaryTable, records]);
 
+  // Gantt Chart Detailed Data Logic (Phase 35)
+  const ganttBlastingTime = useMemo(() => {
+    if (!selectedGanttDate) return '19:00';
+    return dbService.getBlastingTimeForDate(selectedGanttDate);
+  }, [selectedGanttDate]);
+
+  const ganttBlastingObs = useMemo(() => {
+    if (!selectedGanttDate) return '';
+    return dbService.getBlastingObservationsForDate(selectedGanttDate);
+  }, [selectedGanttDate]);
+
+  const ganttShift = useMemo(() => {
+    if (!selectedGanttDate) return 'A';
+    return getShiftForDate(selectedGanttDate);
+  }, [selectedGanttDate]);
+
+  const ganttDayRecords = useMemo(() => {
+    if (!selectedGanttDate) return [];
+    const inLoaded = records.filter(r => r.date === selectedGanttDate);
+    if (inLoaded.length > 0) return inLoaded;
+    return dbService.getAvailabilityForDate(selectedGanttDate);
+  }, [selectedGanttDate, records]);
+
+  const ganttEquipments = useMemo(() => {
+    if (ganttFilterType === 'trucks') {
+      return fleet.filter(e => e.type === 'Camión Fábrica');
+    }
+    return fleet;
+  }, [fleet, ganttFilterType]);
+
+  const ganttStats = useMemo(() => {
+    const trucks = fleet.filter(e => e.type === 'Camión Fábrica');
+    const recs = ganttDayRecords.filter(r => trucks.some(t => t.id === r.equipmentId));
+    
+    let totalAvail = 0;
+    let totalDown = 0;
+    let count100 = 0;
+    let countFailing = 0;
+
+    trucks.forEach(t => {
+      const rec = recs.find(r => r.equipmentId === t.id);
+      if (!rec || rec.status === 'Operativo') {
+        totalAvail += 12;
+        count100 += 1;
+      } else {
+        const down = rec.endHour - rec.startHour;
+        totalDown += down;
+        totalAvail += Math.max(0, 12 - down);
+        countFailing += 1;
+      }
+    });
+
+    const totalPossible = trucks.length * 12;
+    const dailyPct = totalPossible > 0 ? (totalAvail / totalPossible) * 100 : 100;
+
+    return {
+      totalTrucks: trucks.length,
+      count100,
+      countFailing,
+      totalDown,
+      dailyPct,
+      hasRecords: recs.length > 0
+    };
+  }, [fleet, ganttDayRecords]);
+
+  // Calendar cells for the Filtered Dates Gantt Calendar Card (Phase 35)
+  const ganttCalendarCells = useMemo(() => {
+    const calYear = ganttCalDate.getFullYear();
+    const calMonth = ganttCalDate.getMonth();
+
+    const firstDay = new Date(calYear, calMonth, 1);
+    const lastDay = new Date(calYear, calMonth + 1, 0);
+
+    let startDayIdx = firstDay.getDay() - 1; // 0 = Lun, 6 = Dom
+    if (startDayIdx === -1) startDayIdx = 6;
+
+    const daysInMonth = lastDay.getDate();
+    const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
+
+    const cells: { day: number; dateStr: string; isCurrentMonth: boolean }[] = [];
+
+    // Prev month padding
+    for (let i = startDayIdx - 1; i >= 0; i--) {
+      const d = prevMonthDays - i;
+      const prevD = new Date(calYear, calMonth - 1, d);
+      const dateStr = `${prevD.getFullYear()}-${String(prevD.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push({ day: d, dateStr, isCurrentMonth: false });
+    }
+
+    // Current month days
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push({ day: d, dateStr, isCurrentMonth: true });
+    }
+
+    // Next month padding
+    const remaining = (7 - (cells.length % 7)) % 7;
+    for (let d = 1; d <= remaining; d++) {
+      const nextD = new Date(calYear, calMonth + 1, d);
+      const dateStr = `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      cells.push({ day: d, dateStr, isCurrentMonth: false });
+    }
+
+    return cells;
+  }, [ganttCalDate]);
+
+  const getDayTruckAvailability = useCallback((dateStr: string) => {
+    const trucks = fleet.filter(e => e.type === 'Camión Fábrica');
+    if (trucks.length === 0) return { hasRecords: false, pct: 100, downHours: 0 };
+    
+    const dayRecs = records.filter(r => r.date === dateStr);
+    const truckRecs = dayRecs.filter(r => trucks.some(t => t.id === r.equipmentId));
+    
+    if (truckRecs.length === 0) {
+      return { hasRecords: false, pct: 100, downHours: 0 };
+    }
+
+    let totalAvail = 0;
+    let totalDown = 0;
+
+    trucks.forEach(t => {
+      const rec = truckRecs.find(r => r.equipmentId === t.id);
+      if (!rec || rec.status === 'Operativo') {
+        totalAvail += 12;
+      } else {
+        const down = rec.endHour - rec.startHour;
+        totalDown += down;
+        totalAvail += Math.max(0, 12 - down);
+      }
+    });
+
+    const totalPossible = trucks.length * 12;
+    const pct = totalPossible > 0 ? (totalAvail / totalPossible) * 100 : 100;
+
+    return { hasRecords: true, pct, downHours: totalDown };
+  }, [fleet, records]);
+
   // Re-organize records by date for raw materials & attendance stats
   const recordsByDate = useMemo(() => {
     const map: Record<string, AvailabilityRecord[]> = {};
@@ -816,6 +1009,233 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     <span>{getPluralType(t)}</span>
                   </label>
                 ))}
+              </div>
+            </div>
+          </div>
+
+          {/* NUEVA TARJETA: CALENDARIO DE FECHAS FILTRADAS & ACCESO A CARTA GANTT (Fase 35) */}
+          <div className="glass table-card" style={{ marginBottom: '24px', padding: '22px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={18} style={{ color: 'var(--primary)' }} />
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                    Cronograma Diario de Disponibilidad de Camiones (Carta Gantt)
+                  </h3>
+                </div>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                  Haga clic en cualquier día del período filtrado para abrir la Carta Gantt horaria (07:00 a 19:00 hrs) y revisar el estado de cada camión fábrica.
+                </p>
+              </div>
+
+              {/* Controles de Navegación de Mes */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                  Período: {formatToDDMMYYYY(startDate)} al {formatToDDMMYYYY(endDate)}
+                </span>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  <button
+                    type="button"
+                    onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer'
+                    }}
+                    title="Mes anterior"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                  <span style={{ fontWeight: '700', fontSize: '0.88rem', minWidth: '130px', textAlign: 'center', textTransform: 'capitalize' }}>
+                    {MONTH_NAMES_ES[ganttCalDate.getMonth()]} {ganttCalDate.getFullYear()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                    style={{
+                      width: '28px',
+                      height: '28px',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      background: 'rgba(255, 255, 255, 0.05)',
+                      color: 'var(--text-primary)',
+                      cursor: 'pointer'
+                    }}
+                    title="Mes siguiente"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Encabezado Días de la Semana */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', textAlign: 'center', marginBottom: '8px' }}>
+              {WEEKDAYS_SHORT_ES.map(dayName => (
+                <div key={dayName} style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  {dayName}
+                </div>
+              ))}
+            </div>
+
+            {/* Grilla de Días */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+              {ganttCalendarCells.map(({ day, dateStr, isCurrentMonth }, idx) => {
+                const isInRange = dateStr >= startDate && dateStr <= endDate;
+                const shift = getShiftForDate(dateStr);
+                const dayAvail = getDayTruckAvailability(dateStr);
+                const isTodayDate = dateStr === todayStr;
+
+                return (
+                  <button
+                    key={`${dateStr}-${idx}`}
+                    type="button"
+                    disabled={!isInRange}
+                    onClick={() => {
+                      if (isInRange) {
+                        setSelectedGanttDate(dateStr);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      padding: '8px 10px',
+                      minHeight: '68px',
+                      borderRadius: '10px',
+                      border: isTodayDate 
+                        ? '1.5px solid #0066ff' 
+                        : (isInRange ? '1px solid var(--border-color)' : '1px solid transparent'),
+                      background: isInRange ? 'var(--bg-card)' : 'transparent',
+                      opacity: isInRange ? 1 : 0.22,
+                      cursor: isInRange ? 'pointer' : 'default',
+                      position: 'relative',
+                      textAlign: 'left',
+                      transition: 'all 0.15s ease'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isInRange) {
+                        e.currentTarget.style.borderColor = '#0066ff';
+                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(0, 102, 255, 0.16)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isInRange) {
+                        e.currentTarget.style.borderColor = isTodayDate ? '#0066ff' : 'var(--border-color)';
+                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.transform = 'none';
+                      }
+                    }}
+                  >
+                    {/* Fila Superior: Número del Día y Badge de Turno */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <span style={{ 
+                        fontWeight: '700', 
+                        fontSize: '0.88rem', 
+                        color: isTodayDate ? '#0066ff' : (isCurrentMonth ? 'var(--text-primary)' : 'var(--text-muted)') 
+                      }}>
+                        {day}
+                      </span>
+                      {isInRange && (
+                        <span style={{
+                          fontSize: '0.62rem',
+                          fontWeight: '800',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          background: shift === 'A' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                          color: shift === 'A' ? '#2563eb' : '#d97706',
+                          border: shift === 'A' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                        }}
+                        title={`Turno ${shift}`}
+                        >
+                          {shift}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Fila Inferior: Disponibilidad de Camiones */}
+                    {isInRange && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: '6px' }}>
+                        {dayAvail.hasRecords ? (
+                          <>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.73rem',
+                              fontWeight: '700',
+                              color: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
+                            }}>
+                              <span style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
+                              }} />
+                              {dayAvail.pct.toFixed(0)}%
+                            </span>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: '600' }}>
+                              Gantt ↗
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            Sin reg.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Leyenda Inferior */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between', 
+              flexWrap: 'wrap', 
+              gap: '12px',
+              marginTop: '16px',
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-color)',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>A</span>
+                  <span>Turno A</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(217, 119, 6, 0.15)', color: '#d97706', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>B</span>
+                  <span>Turno B</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                  <span>≥95% Disponibilidad (Óptimo)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                  <span>&lt;95% Con Fallas / Inactividad</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--primary)' }}>
+                <Clock size={14} />
+                <span>Haga clic en un día para abrir su Carta Gantt de 12 horas</span>
               </div>
             </div>
           </div>
@@ -2234,6 +2654,426 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                   })}
                 </tbody>
               </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL CARTA GANTT DE 12 HORAS (Fase 35) */}
+      {selectedGanttDate && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.72)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1100,
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+          padding: '20px'
+        }}>
+          <div 
+            className="glass table-card" 
+            style={{ 
+              width: '100%', 
+              maxWidth: '1200px', 
+              maxHeight: '92vh', 
+              overflowY: 'auto', 
+              padding: '28px', 
+              position: 'relative',
+              borderRadius: '16px',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.45)',
+              animation: 'fadeInUp 0.2s ease-out'
+            }}
+          >
+            {/* Botón Cerrar */}
+            <button 
+              type="button"
+              onClick={() => setSelectedGanttDate(null)}
+              style={{
+                position: 'absolute',
+                top: '20px',
+                right: '20px',
+                background: 'rgba(255, 255, 255, 0.08)',
+                border: 'none',
+                width: '32px',
+                height: '32px',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)';
+                e.currentTarget.style.color = 'var(--text-primary)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+                e.currentTarget.style.color = 'var(--text-secondary)';
+              }}
+              title="Cerrar ventana"
+            >
+              <X size={18} />
+            </button>
+
+            {/* Encabezado del Modal */}
+            <div style={{ marginBottom: '20px', paddingRight: '40px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '8px' }}>
+                <div style={{ 
+                  width: '36px', 
+                  height: '36px', 
+                  borderRadius: '10px', 
+                  background: 'rgba(0, 102, 255, 0.12)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  color: 'var(--primary)'
+                }}>
+                  <Clock size={20} />
+                </div>
+                <h2 className="chart-title" style={{ margin: 0, fontSize: '1.3rem', textTransform: 'capitalize' }}>
+                  Carta Gantt de Operaciones: {formatFullDateEs(selectedGanttDate)}
+                </h2>
+
+                {/* Badge Turno */}
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  background: ganttShift === 'A' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                  color: ganttShift === 'A' ? '#2563eb' : '#d97706',
+                  border: ganttShift === 'A' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                }}>
+                  <span style={{ width: '7px', height: '7px', borderRadius: '50%', background: ganttShift === 'A' ? '#2563eb' : '#d97706' }} />
+                  Turno {ganttShift}
+                </span>
+
+                {/* Badge Tronadura */}
+                <span style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '4px 10px',
+                  borderRadius: '6px',
+                  fontSize: '0.8rem',
+                  fontWeight: '700',
+                  background: ganttBlastingTime === '07:00' ? 'rgba(255, 255, 255, 0.06)' : 'rgba(245, 158, 11, 0.15)',
+                  color: ganttBlastingTime === '07:00' ? 'var(--text-muted)' : '#f59e0b',
+                  border: ganttBlastingTime === '07:00' ? '1px solid var(--border-color)' : '1px solid rgba(245, 158, 11, 0.3)'
+                }}>
+                  <Zap size={13} />
+                  {ganttBlastingTime === '07:00' ? 'Sin Tronadura' : `Hora de Tronadura: ${ganttBlastingTime} hrs`}
+                </span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                Visualización detallada de la línea de tiempo de 12 horas (07:00 a 19:00 hrs) y el estado horario de cada camión fábrica.
+              </p>
+            </div>
+
+            {/* Banner de Observaciones de Tronadura si existen */}
+            {ganttBlastingObs && (
+              <div style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: '12px',
+                background: 'rgba(245, 158, 11, 0.08)',
+                border: '1px solid rgba(245, 158, 11, 0.28)',
+                padding: '12px 16px',
+                borderRadius: '10px',
+                marginBottom: '20px',
+                fontSize: '0.88rem'
+              }}>
+                <Zap size={18} style={{ color: '#f59e0b', flexShrink: 0, marginTop: '2px' }} />
+                <div>
+                  <strong style={{ color: '#f59e0b', display: 'block', marginBottom: '2px' }}>
+                    Observaciones del Horario de Tronadura:
+                  </strong>
+                  <span style={{ color: 'var(--text-primary)', lineHeight: 1.45 }}>{ganttBlastingObs}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Tarjetas Resumen del Día */}
+            <div style={{ 
+              display: 'grid', 
+              gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', 
+              gap: '14px', 
+              marginBottom: '22px' 
+            }}>
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Total Camiones Fábrica</span>
+                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: 'var(--text-primary)', marginTop: '2px' }}>
+                  {ganttStats.totalTrucks} unidades
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>100% Operativos</span>
+                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: '#10b981', marginTop: '2px' }}>
+                  {ganttStats.count100} de {ganttStats.totalTrucks}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Con Inactividad / Falla</span>
+                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: ganttStats.countFailing > 0 ? '#ef4444' : 'var(--text-muted)', marginTop: '2px' }}>
+                  {ganttStats.countFailing} {ganttStats.countFailing === 1 ? 'camión' : 'camiones'}
+                </div>
+              </div>
+
+              <div style={{ background: 'var(--bg-card)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '12px 16px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: '600', color: 'var(--text-muted)', textTransform: 'uppercase' }}>Disponibilidad del Día</span>
+                <div style={{ fontSize: '1.4rem', fontWeight: '700', color: ganttStats.dailyPct >= 95 ? '#10b981' : '#ef4444', marginTop: '2px' }}>
+                  {ganttStats.dailyPct.toFixed(1)}%
+                </div>
+              </div>
+            </div>
+
+            {/* Controles de Vista de Equipos */}
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => setGanttFilterType('trucks')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '0.85rem',
+                    fontWeight: '600',
+                    border: '1px solid',
+                    borderColor: ganttFilterType === 'trucks' ? 'var(--primary)' : 'var(--border-color)',
+                    background: ganttFilterType === 'trucks' ? 'var(--primary)' : 'transparent',
+                    color: ganttFilterType === 'trucks' ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <Truck size={15} />
+                  <span>Solo Camiones Fábrica ({fleet.filter(e => e.type === 'Camión Fábrica').length})</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGanttFilterType('all')}
+                  style={{
+                    padding: '8px 16px',
+                    borderRadius: '8px',
+                    fontSize: '0.85rem',
+                    fontWeight: '600',
+                    border: '1px solid',
+                    borderColor: ganttFilterType === 'all' ? 'var(--primary)' : 'var(--border-color)',
+                    background: ganttFilterType === 'all' ? 'var(--primary)' : 'transparent',
+                    color: ganttFilterType === 'all' ? '#ffffff' : 'var(--text-secondary)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                >
+                  <span>Todos los Equipos ({fleet.length})</span>
+                </button>
+              </div>
+
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                Turno 12 hrs: 07:00 a 19:00 hrs
+              </div>
+            </div>
+
+            {/* Tabla Carta Gantt */}
+            <div className="table-wrapper" style={{ overflowX: 'auto', marginBottom: '20px' }}>
+              <table style={{ width: '100%', minWidth: '950px', borderCollapse: 'separate', borderSpacing: 0 }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: '180px', textAlign: 'left', padding: '10px 12px' }}>Equipo / Patente</th>
+                    <th style={{ width: '90px', textAlign: 'center', padding: '10px 8px' }}>Rol</th>
+                    {/* 12 Columnas Horarias */}
+                    {GANTT_HOURS.map(h => {
+                      const isBlastHour = ganttBlastingTime !== '07:00' && parseInt(ganttBlastingTime.split(':')[0], 10) === h;
+                      return (
+                        <th 
+                          key={h} 
+                          style={{ 
+                            width: '45px', 
+                            textAlign: 'center', 
+                            padding: '8px 2px',
+                            fontSize: '0.74rem',
+                            fontWeight: '700',
+                            background: isBlastHour ? 'rgba(245, 158, 11, 0.15)' : undefined,
+                            borderBottom: isBlastHour ? '2px solid #f59e0b' : undefined
+                          }}
+                          title={isBlastHour ? `Hora de tronadura: ${ganttBlastingTime} hrs` : `${h < 10 ? `0${h}` : h}:00 - ${h + 1 < 10 ? `0${h + 1}` : h + 1}:00`}
+                        >
+                          <div>{h < 10 ? `0${h}` : h}h</div>
+                          {isBlastHour && <div style={{ fontSize: '0.65rem', color: '#f59e0b', lineHeight: 1 }}>⚡</div>}
+                        </th>
+                      );
+                    })}
+                    <th style={{ width: '95px', textAlign: 'center', padding: '10px 8px' }}>Disponibilidad</th>
+                    <th style={{ width: '220px', textAlign: 'left', padding: '10px 12px' }}>Detalle de Falla / Causa</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ganttEquipments.map(eq => {
+                    const rec = ganttDayRecords.find(r => r.equipmentId === eq.id);
+                    const isOperativo = !rec || rec.status === 'Operativo';
+                    const totalDown = rec ? rec.endHour - rec.startHour : 0;
+                    const hoursAvail = rec ? rec.hoursAvailable : 12;
+
+                    return (
+                      <tr key={eq.id}>
+                        <td style={{ padding: '10px 12px' }}>
+                          <div style={{ fontWeight: '700', fontSize: '0.88rem' }}>{eq.name}</div>
+                          <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            <code>{eq.patent || '-'}</code> • {eq.type}
+                          </div>
+                        </td>
+
+                        <td style={{ textAlign: 'center', padding: '10px 8px' }}>
+                          <span style={{
+                            fontSize: '0.72rem',
+                            fontWeight: '600',
+                            padding: '2px 6px',
+                            borderRadius: '4px',
+                            background: eq.isContractual ? 'rgba(0, 102, 255, 0.1)' : 'rgba(255, 255, 255, 0.05)',
+                            color: eq.isContractual ? 'var(--primary)' : 'var(--text-muted)'
+                          }}>
+                            {eq.isContractual ? 'Contractual' : 'Respaldo'}
+                          </span>
+                        </td>
+
+                        {/* 12 Bloques de la Carta Gantt */}
+                        {GANTT_HOURS.map(h => {
+                          const isHourDown = !isOperativo && rec && (h >= rec.startHour && h < rec.endHour);
+                          const isBlastHour = ganttBlastingTime !== '07:00' && parseInt(ganttBlastingTime.split(':')[0], 10) === h;
+                          const cellColor = isHourDown ? getGanttStatusColor(rec.status) : '#10b981';
+
+                          return (
+                            <td 
+                              key={h}
+                              style={{ 
+                                padding: '4px 2px', 
+                                textAlign: 'center',
+                                background: isBlastHour ? 'rgba(245, 158, 11, 0.04)' : undefined
+                              }}
+                            >
+                              <div
+                                style={{
+                                  width: '100%',
+                                  height: '24px',
+                                  borderRadius: '4px',
+                                  background: cellColor,
+                                  opacity: isHourDown ? 1 : 0.88,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '0.65rem',
+                                  fontWeight: '800',
+                                  color: '#ffffff',
+                                  boxShadow: isHourDown ? '0 1px 3px rgba(0,0,0,0.2)' : 'none',
+                                  cursor: 'pointer'
+                                }}
+                                title={`${h < 10 ? `0${h}` : h}:00 - ${h + 1 < 10 ? `0${h + 1}` : h + 1}:00: ${isHourDown ? `${rec.status} (${rec.comment || 'Sin detalle'})` : 'Operativo'}`}
+                              >
+                                {isHourDown ? 'X' : ''}
+                              </div>
+                            </td>
+                          );
+                        })}
+
+                        {/* Disponibilidad */}
+                        <td style={{ textAlign: 'center', padding: '10px 8px' }}>
+                          <div style={{ fontWeight: '700', fontSize: '0.88rem', color: hoursAvail === 12 ? '#10b981' : '#ef4444' }}>
+                            {hoursAvail} hrs
+                          </div>
+                          {totalDown > 0 && (
+                            <div style={{ fontSize: '0.72rem', color: '#ef4444' }}>
+                              -{totalDown} hrs
+                            </div>
+                          )}
+                        </td>
+
+                        {/* Comentario de Falla */}
+                        <td style={{ padding: '10px 12px', fontSize: '0.82rem' }}>
+                          {!isOperativo && rec ? (
+                            <div>
+                              <span className={`badge badge-${getStatusClass(rec.status)}`} style={{ marginBottom: '3px', display: 'inline-block' }}>
+                                {rec.status}
+                              </span>
+                              <div style={{ fontStyle: 'italic', color: 'var(--text-secondary)' }}>
+                                {rec.comment || 'Sin comentarios registrados.'}
+                              </div>
+                            </div>
+                          ) : (
+                            <span style={{ color: '#10b981', fontWeight: '600' }}>✓ 100% Operativo</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Leyenda de la Carta Gantt */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between', 
+              flexWrap: 'wrap', 
+              gap: '14px',
+              paddingTop: '16px',
+              borderTop: '1px solid var(--border-color)',
+              fontSize: '0.78rem',
+              color: 'var(--text-muted)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#10b981' }} />
+                  <span>Operativo</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#ef4444' }} />
+                  <span>Mantención Correctiva</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#3b82f6' }} />
+                  <span>Mantención Preventiva</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#f59e0b' }} />
+                  <span>Mantención Programada</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '14px', height: '14px', borderRadius: '3px', background: '#8b5cf6' }} />
+                  <span>Mantención Predictiva</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ color: '#f59e0b', fontWeight: '800' }}>⚡</span>
+                  <span>Hora de Tronadura</span>
+                </div>
+              </div>
+
+              <button 
+                type="button"
+                className="btn btn-secondary btn-sm" 
+                onClick={() => setSelectedGanttDate(null)}
+                style={{ padding: '8px 18px' }}
+              >
+                Cerrar Carta Gantt
+              </button>
             </div>
           </div>
         </div>

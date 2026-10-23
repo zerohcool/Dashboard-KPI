@@ -7,7 +7,7 @@ import type {
 } from '../services/db';
 import { getPluralType } from '../utils/calculations';
 import { Save, AlertCircle, Copy, Truck, Layers, Users, Calendar, CheckCircle2 } from 'lucide-react';
-import { DatePicker } from './DatePicker';
+import { DatePicker, getShiftForDate } from './DatePicker';
 import { ConfirmDialog } from './ConfirmDialog';
 
 const getStatusClass = (status: string) => {
@@ -45,6 +45,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
   const [formState, setFormState] = useState<Record<string, FormRecordState>>({});
   const [selectedEqIds, setSelectedEqIds] = useState<Set<string>>(new Set());
   const [blastingTime, setBlastingTime] = useState<string>('19:00');
+  const [blastingObservations, setBlastingObservations] = useState<string>('');
   const [isNoBlasting, setIsNoBlasting] = useState<boolean>(false);
   const [showEqSelector, setShowEqSelector] = useState<boolean>(false);
 
@@ -298,6 +299,9 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     setBlastingTime(dailyBlasting);
     setIsNoBlasting(dailyBlasting === '07:00');
 
+    const dailyObs = dbService.getBlastingObservationsForDate(selectedDate);
+    setBlastingObservations(dailyObs);
+
     const raw = dbService.getRawMaterialsForDate(selectedDate);
     setNitratoStock(raw.nitratoStock);
     setMatrizStock(raw.matrizStock);
@@ -484,7 +488,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
   const executeSaveEquipments = () => {
     const recordsToSave = Object.values(formState).filter(r => selectedEqIds.has(r.equipmentId));
     const promises: Promise<any>[] = [
-      dbService.saveBlastingTimeForDate(selectedDate, blastingTime),
+      dbService.saveBlastingTimeForDate(selectedDate, blastingTime, blastingObservations),
       dbService.saveAvailabilityRecords(selectedDate, recordsToSave)
     ];
 
@@ -634,6 +638,9 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
     const prevBlasting = dbService.getBlastingTimeForDate(prevDateStr);
     setBlastingTime(prevBlasting);
     setIsNoBlasting(prevBlasting === '07:00');
+
+    const prevObs = dbService.getBlastingObservationsForDate(prevDateStr);
+    setBlastingObservations(prevObs);
 
     const prevRaw = dbService.getRawMaterialsForDate(prevDateStr);
     setNitratoStock(prevRaw.nitratoStock);
@@ -877,7 +884,7 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
               <span className="filter-label" style={{ display: 'block', marginBottom: '4px' }}>
                 {activeSubTab === 'dotacion' ? 'Turno Semanal Activo' : 'Fecha de Registro Activa'}
               </span>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
                 {activeSubTab === 'dotacion' ? (
                   <div style={{ fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
                     Semana del {formatDateDMY(activeWeekStart)} al {formatDateDMY(activeWeekEnd)}
@@ -887,6 +894,31 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
                     {formatFullDate(selectedDate)}
                   </div>
                 )}
+
+                {/* Badge Turno A / B */}
+                <span 
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '3px 9px',
+                    borderRadius: '6px',
+                    fontSize: '0.78rem',
+                    fontWeight: '700',
+                    background: getShiftForDate(selectedDate) === 'A' ? 'rgba(37, 99, 235, 0.12)' : 'rgba(217, 119, 6, 0.12)',
+                    color: getShiftForDate(selectedDate) === 'A' ? '#2563eb' : '#d97706',
+                    border: getShiftForDate(selectedDate) === 'A' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                  }}
+                  title={`Semana correspondiente al Turno ${getShiftForDate(selectedDate)}`}
+                >
+                  <span style={{
+                    width: '7px',
+                    height: '7px',
+                    borderRadius: '50%',
+                    background: getShiftForDate(selectedDate) === 'A' ? '#2563eb' : '#d97706'
+                  }} />
+                  Turno {getShiftForDate(selectedDate)}
+                </span>
               </div>
             </div>
 
@@ -1060,80 +1092,125 @@ export const DailyLogView = React.forwardRef<{ saveCurrentTab: () => Promise<voi
           {activeSubTab === 'equipos' && (
             <div style={{ 
               display: 'flex', 
-              alignItems: 'flex-end', 
-              justifyContent: 'space-between', 
-              flexWrap: 'wrap', 
+              flexDirection: 'column',
               gap: '12px',
               paddingTop: '12px',
               borderTop: '1px solid var(--border-color)'
             }}>
-              <div className="filter-group">
-                <span className="filter-label">Hora de Tronadura (24 hrs)</span>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <select
-                    disabled={isNoBlasting}
-                    value={blastingHour}
-                    onChange={(e) => {
-                      const h = parseInt(e.target.value, 10);
-                      const hStr = h < 10 ? `0${h}` : `${h}`;
-                      const mStr = blastingMin < 10 ? `0${blastingMin}` : `${blastingMin}`;
-                      handleBlastingTimeChange(`${hStr}:${mStr}`);
-                    }}
-                    style={{ width: '70px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
-                  >
-                    {hoursList.map(h => (
-                      <option key={h} value={h}>{h < 10 ? `0${h}` : `${h}`}</option>
-                    ))}
-                  </select>
-                  <span style={{ fontWeight: 'bold', opacity: isNoBlasting ? 0.6 : 1 }}>:</span>
-                  <select
-                    disabled={isNoBlasting}
-                    value={blastingMin}
-                    onChange={(e) => {
-                      const m = parseInt(e.target.value, 10);
-                      const hStr = blastingHour < 10 ? `0${blastingHour}` : `${blastingHour}`;
-                      const mStr = m < 10 ? `0${m}` : `${m}`;
-                      handleBlastingTimeChange(`${hStr}:${mStr}`);
-                    }}
-                    style={{ width: '75px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
-                  >
-                    {Array.from({ length: 60 }, (_, i) => i).map(m => (
-                      <option key={m} value={m}>{m < 10 ? `0${m}` : `${m}`}</option>
-                    ))}
-                  </select>
-                  <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', opacity: isNoBlasting ? 0.6 : 1, marginRight: '8px' }}>hrs</span>
-                  
-                  {/* Sin Tronadura Selector */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.03)', padding: '6px 10px', borderRadius: '6px', userSelect: 'none' }}>
-                    <input
-                      type="checkbox"
-                      id="no-blasting-chk"
-                      checked={isNoBlasting}
+              <div style={{ 
+                display: 'flex', 
+                alignItems: 'flex-end', 
+                justifyContent: 'space-between', 
+                flexWrap: 'wrap', 
+                gap: '12px' 
+              }}>
+                <div className="filter-group">
+                  <span className="filter-label">Hora de Tronadura (24 hrs)</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <select
+                      disabled={isNoBlasting}
+                      value={blastingHour}
                       onChange={(e) => {
-                        const checked = e.target.checked;
-                        setIsNoBlasting(checked);
-                        if (checked) {
-                          handleBlastingTimeChange('07:00');
-                        } else {
-                          handleBlastingTimeChange('19:00'); // default
-                        }
+                        const h = parseInt(e.target.value, 10);
+                        const hStr = h < 10 ? `0${h}` : `${h}`;
+                        const mStr = blastingMin < 10 ? `0${blastingMin}` : `${blastingMin}`;
+                        handleBlastingTimeChange(`${hStr}:${mStr}`);
                       }}
-                      style={{ width: '16px', height: '16px', cursor: 'pointer' }}
-                    />
-                    <label htmlFor="no-blasting-chk" style={{ fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
-                      Sin Tronadura
-                    </label>
+                      style={{ width: '70px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
+                    >
+                      {hoursList.map(h => (
+                        <option key={h} value={h}>{h < 10 ? `0${h}` : `${h}`}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontWeight: 'bold', opacity: isNoBlasting ? 0.6 : 1 }}>:</span>
+                    <select
+                      disabled={isNoBlasting}
+                      value={blastingMin}
+                      onChange={(e) => {
+                        const m = parseInt(e.target.value, 10);
+                        const hStr = blastingHour < 10 ? `0${blastingHour}` : `${blastingHour}`;
+                        const mStr = m < 10 ? `0${m}` : `${m}`;
+                        handleBlastingTimeChange(`${hStr}:${mStr}`);
+                      }}
+                      style={{ width: '75px', fontWeight: 'bold', padding: '8px', opacity: isNoBlasting ? 0.6 : 1, cursor: isNoBlasting ? 'not-allowed' : 'default' }}
+                    >
+                      {Array.from({ length: 60 }, (_, i) => i).map(m => (
+                        <option key={m} value={m}>{m < 10 ? `0${m}` : `${m}`}</option>
+                      ))}
+                    </select>
+                    <span style={{ fontSize: '0.85rem', fontWeight: '600', color: 'var(--text-secondary)', opacity: isNoBlasting ? 0.6 : 1, marginRight: '8px' }}>hrs</span>
+                    
+                    {/* Sin Tronadura Selector */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', background: 'rgba(0,0,0,0.03)', padding: '6px 10px', borderRadius: '6px', userSelect: 'none' }}>
+                      <input
+                        type="checkbox"
+                        id="no-blasting-chk"
+                        checked={isNoBlasting}
+                        onChange={(e) => {
+                          const checked = e.target.checked;
+                          setIsNoBlasting(checked);
+                          if (checked) {
+                            handleBlastingTimeChange('07:00');
+                          } else {
+                            handleBlastingTimeChange('19:00'); // default
+                          }
+                        }}
+                        style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+                      />
+                      <label htmlFor="no-blasting-chk" style={{ fontSize: '0.8rem', fontWeight: '600', cursor: 'pointer', color: 'var(--text-primary)' }}>
+                        Sin Tronadura
+                      </label>
+                    </div>
                   </div>
                 </div>
+
+                <button 
+                  className="btn btn-secondary btn-sm" 
+                  onClick={() => setShowEqSelector(!showEqSelector)}
+                  style={{ height: '40px' }}
+                >
+                  {showEqSelector ? 'Ocultar Selector de Equipos' : 'Seleccionar Equipos del Día'}
+                </button>
               </div>
 
-              <button 
-                className="btn btn-secondary btn-sm" 
-                onClick={() => setShowEqSelector(!showEqSelector)}
-                style={{ height: '40px' }}
-              >
-                {showEqSelector ? 'Ocultar Selector de Equipos' : 'Seleccionar Equipos del Día'}
-              </button>
+              {/* Input Observaciones Horario de Tronadura */}
+              <div style={{ 
+                display: 'flex', 
+                flexDirection: 'column', 
+                gap: '6px',
+                background: 'rgba(255, 255, 255, 0.03)',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
+                  <label htmlFor="blasting-obs-input" className="filter-label" style={{ marginBottom: 0 }}>
+                    Observaciones Horario de Tronadura
+                  </label>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
+                    (Cumplimiento, causas de retraso o alteraciones)
+                  </span>
+                </div>
+                <input
+                  id="blasting-obs-input"
+                  type="text"
+                  value={blastingObservations}
+                  onChange={(e) => {
+                    setBlastingObservations(e.target.value);
+                    setIsEquipmentsDirty(true);
+                  }}
+                  placeholder="Ej: Tronadura efectuada en horario programado sin novedades / Retraso de 20 min por despeje de área..."
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    fontSize: '0.85rem',
+                    borderRadius: '6px',
+                    background: 'var(--bg-input)',
+                    border: '1px solid var(--border-input)',
+                    color: 'var(--text-input)'
+                  }}
+                />
+              </div>
             </div>
           )}
 

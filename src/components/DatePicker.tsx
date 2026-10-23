@@ -43,6 +43,27 @@ const formatDisplayDate = (dateStr: string): string => {
   return dateStr;
 };
 
+/**
+ * Calcula a qué turno (A o B) corresponde una fecha dada.
+ * Turno A: inició el miércoles 31 de diciembre de 2025 (duración 7 días: miércoles a martes).
+ * Turno B: inició el miércoles 07 de enero de 2026 (duración 7 días: miércoles a martes).
+ * Y así se alternan sucesivamente cada 7 días.
+ */
+export const getShiftForDate = (date: Date | string): 'A' | 'B' => {
+  let target: Date;
+  if (typeof date === 'string') {
+    const parts = date.split('-').map(Number);
+    if (parts.length !== 3) return 'A';
+    target = new Date(parts[0], parts[1] - 1, parts[2], 12, 0, 0);
+  } else {
+    target = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 12, 0, 0);
+  }
+  const base = new Date(2025, 11, 31, 12, 0, 0); // 31 Dic 2025 (Miércoles)
+  const diffDays = Math.floor((target.getTime() - base.getTime()) / (1000 * 60 * 60 * 24));
+  const weekIdx = Math.floor(diffDays / 7);
+  return ((weekIdx % 2) + 2) % 2 === 0 ? 'A' : 'B';
+};
+
 export const DatePicker: React.FC<DatePickerProps> = ({ 
   value, 
   onChange, 
@@ -373,13 +394,19 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             };
           }
 
+          const shift = getShiftForDate(dateObj);
+          const isHighlighted = active || isStart || isEnd;
+
           return (
             <button
               key={`${dateObj.getTime()}-${idx}`}
               type="button"
               disabled={disabled}
               onClick={(e) => handleSelectDay(dateObj, e)}
-              style={cellStyle}
+              style={{
+                ...cellStyle,
+                position: 'relative'
+              }}
               className="calendar-day-btn"
               onMouseEnter={(e) => {
                 if (!active && !disabled && !isStart && !isEnd && !isInRange) {
@@ -393,10 +420,80 @@ export const DatePicker: React.FC<DatePickerProps> = ({
                 }
               }}
             >
-              {day}
+              <span style={{ fontSize: '0.82rem', fontWeight: '600' }}>{day}</span>
+              <span 
+                style={{
+                  position: 'absolute',
+                  bottom: '1px',
+                  right: '2px',
+                  fontSize: '0.54rem',
+                  fontWeight: '800',
+                  lineHeight: 1,
+                  padding: '1px 2px',
+                  borderRadius: '2px',
+                  color: isHighlighted 
+                    ? '#ffffff' 
+                    : (shift === 'A' ? '#2563eb' : '#d97706'),
+                  background: isHighlighted 
+                    ? 'rgba(255,255,255,0.25)' 
+                    : (shift === 'A' ? 'rgba(37, 99, 235, 0.12)' : 'rgba(217, 119, 6, 0.12)'),
+                  opacity: disabled || !isCurrentMonth ? 0.35 : 1
+                }}
+                title={`Turno ${shift}`}
+              >
+                {shift}
+              </span>
             </button>
           );
         })}
+      </div>
+
+      {/* Leyenda de Turnos */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '14px',
+          marginTop: '10px',
+          paddingTop: '8px',
+          borderTop: '1px solid var(--border-color)',
+          fontSize: '0.7rem',
+          color: 'var(--text-muted)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ 
+            width: '14px', 
+            height: '14px', 
+            borderRadius: '3px', 
+            background: 'rgba(37, 99, 235, 0.15)', 
+            color: '#2563eb', 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            fontWeight: '800', 
+            fontSize: '0.62rem',
+            border: '1px solid rgba(37, 99, 235, 0.3)'
+          }}>A</span>
+          <span style={{ fontWeight: '600' }}>Turno A</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+          <span style={{ 
+            width: '14px', 
+            height: '14px', 
+            borderRadius: '3px', 
+            background: 'rgba(217, 119, 6, 0.15)', 
+            color: '#d97706', 
+            display: 'inline-flex', 
+            alignItems: 'center', 
+            justifyContent: 'center', 
+            fontWeight: '800', 
+            fontSize: '0.62rem',
+            border: '1px solid rgba(217, 119, 6, 0.3)'
+          }}>B</span>
+          <span style={{ fontWeight: '600' }}>Turno B</span>
+        </div>
       </div>
     </>
   );

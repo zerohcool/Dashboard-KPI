@@ -235,10 +235,15 @@ export const dbService = {
     const btData = await fetchAllFromTable('blasting_times');
     if (btData && btData.length > 0) {
       const btMap: Record<string, string> = {};
+      const obsMap: Record<string, string> = {};
       btData.forEach((row: any) => {
         btMap[row.date] = row.time;
+        if (row.observations) {
+          obsMap[row.date] = row.observations;
+        }
       });
       localStorage.setItem('disponibilidad_equipos_blasting_times', JSON.stringify(btMap));
+      localStorage.setItem('disponibilidad_equipos_blasting_observations', JSON.stringify(obsMap));
     }
     
     // 3. Fetch availability records (paginated to handle >1000 rows without truncating)
@@ -522,18 +527,42 @@ export const dbService = {
     return String(val);
   },
 
-  async saveBlastingTimeForDate(date: string, time: string): Promise<void> {
+  getBlastingObservationsForDate(date: string): string {
+    const data = localStorage.getItem('disponibilidad_equipos_blasting_observations');
+    if (!data) return '';
+    try {
+      const map = JSON.parse(data);
+      return map[date] || '';
+    } catch {
+      return '';
+    }
+  },
+
+  async saveBlastingTimeForDate(date: string, time: string, observations: string = ''): Promise<void> {
     const data = localStorage.getItem('disponibilidad_equipos_blasting_times');
     const map = data ? JSON.parse(data) : {};
     map[date] = time;
     localStorage.setItem('disponibilidad_equipos_blasting_times', JSON.stringify(map));
 
+    const obsData = localStorage.getItem('disponibilidad_equipos_blasting_observations');
+    const obsMap = obsData ? JSON.parse(obsData) : {};
+    obsMap[date] = observations;
+    localStorage.setItem('disponibilidad_equipos_blasting_observations', JSON.stringify(obsMap));
+
     if (supabase) {
-      const { error } = await supabase.from('blasting_times').upsert({
-        date,
-        time
-      });
-      if (error) throw error;
+      try {
+        const { error } = await supabase.from('blasting_times').upsert({
+          date,
+          time,
+          observations
+        });
+        if (error) {
+          console.warn('Fallback guardando blasting_times sin observations:', error.message);
+          await supabase.from('blasting_times').upsert({ date, time });
+        }
+      } catch (e) {
+        console.warn('Error al guardar en blasting_times:', e);
+      }
     }
   },
 

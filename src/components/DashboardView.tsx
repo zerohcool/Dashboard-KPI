@@ -78,6 +78,41 @@ const WEEKDAYS_SHORT_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
 const GANTT_HOURS = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18];
 
+const parseLocalDate = (dateStr: string): Date | null => {
+  if (!dateStr) return null;
+  const parts = dateStr.split('-');
+  if (parts.length !== 3) return null;
+  return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+};
+
+export const getCommercialPeriodDates = (edpYear: number, edpMonth: number): { startDate: string; endDate: string } => {
+  const startMonth = edpMonth === 1 ? 12 : edpMonth - 1;
+  const startYear = edpMonth === 1 ? edpYear - 1 : edpYear;
+  const startDate = `${startYear}-${String(startMonth).padStart(2, '0')}-21`;
+  const endDate = `${edpYear}-${String(edpMonth).padStart(2, '0')}-20`;
+  return { startDate, endDate };
+};
+
+export const getCurrentCommercialPeriod = (refDate = new Date()): { edpYear: number; edpMonth: number; startDate: string; endDate: string } => {
+  const year = refDate.getFullYear();
+  const month = refDate.getMonth() + 1; // 1 to 12
+  const day = refDate.getDate();
+
+  let edpYear = year;
+  let edpMonth = month;
+  if (day >= 21) {
+    if (month === 12) {
+      edpYear += 1;
+      edpMonth = 1;
+    } else {
+      edpMonth += 1;
+    }
+  }
+
+  const { startDate, endDate } = getCommercialPeriodDates(edpYear, edpMonth);
+  return { edpYear, edpMonth, startDate, endDate };
+};
+
 const getGanttStatusColor = (status: string) => {
   switch (status) {
     case 'Operativo':
@@ -122,6 +157,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     }
     return new Date();
   });
+
+  // Close Gantt modal on Escape key
+  useEffect(() => {
+    if (!selectedGanttDate) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSelectedGanttDate(null);
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedGanttDate]);
 
   // Sync calendar month if range changes
   useEffect(() => {
@@ -304,46 +349,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
   };
 
   const setContractCyclePreset = () => {
-    const today = new Date();
-    const currentDay = today.getDate();
-    let startYear = today.getFullYear();
-    let startMonth = today.getMonth();
-    let endYear = today.getFullYear();
-    let endMonth = today.getMonth();
-
-    if (currentDay >= 21) {
-      endMonth = currentMonthToNextMonth(today.getMonth());
-      if (endMonth === 0) endYear += 1;
-    } else {
-      startMonth = prevMonthIndex(today.getMonth());
-      if (startMonth === 11) startYear -= 1;
-    }
-
-    function currentMonthToNextMonth(m: number) {
-      return m === 11 ? 0 : m + 1;
-    }
-    function prevMonthIndex(m: number) {
-      return m === 0 ? 11 : m - 1;
-    }
-
-    const startObj = new Date(startYear, startMonth, 21);
-    const endObj = new Date(endYear, endMonth, 20);
-
-    const todayNoon = new Date();
-    todayNoon.setHours(12, 0, 0, 0);
-    if (endObj.getTime() > todayNoon.getTime()) {
-      endObj.setTime(todayNoon.getTime());
-    }
-
-    const toLocalISO = (d: Date) => {
-      const offset = d.getTimezoneOffset();
-      const localDate = new Date(d.getTime() - (offset * 60 * 1000));
-      return localDate.toISOString().split('T')[0];
-    };
-
-    setStartDate(toLocalISO(startObj));
-    setEndDate(toLocalISO(endObj));
+    const currentEdp = getCurrentCommercialPeriod(new Date());
+    setStartDate(currentEdp.startDate);
+    setEndDate(currentEdp.endDate);
   };
+
+  const commercialPeriodOptions = useMemo(() => {
+    const options: { key: string; label: string; startDate: string; endDate: string; isCurrent: boolean }[] = [];
+    const today = new Date();
+    const currentEdp = getCurrentCommercialPeriod(today);
+
+    // Generate 1 future, current, and past 11 EDPs (total 13 options)
+    for (let offset = 1; offset >= -11; offset--) {
+      let edpM = currentEdp.edpMonth + offset;
+      let edpY = currentEdp.edpYear;
+      while (edpM < 1) {
+        edpM += 12;
+        edpY -= 1;
+      }
+      while (edpM > 12) {
+        edpM -= 12;
+        edpY += 1;
+      }
+
+      const { startDate: periodStart, endDate: periodEnd } = getCommercialPeriodDates(edpY, edpM);
+      const prevM = edpM === 1 ? 12 : edpM - 1;
+      const isCurrent = edpY === currentEdp.edpYear && edpM === currentEdp.edpMonth;
+
+      options.push({
+        key: `${periodStart}_${periodEnd}`,
+        label: `EDP ${MONTH_NAMES_ES[edpM - 1]} ${edpY} (21 ${MONTH_NAMES_ES[prevM - 1].slice(0, 3)} - 20 ${MONTH_NAMES_ES[edpM - 1].slice(0, 3)})${isCurrent ? ' • Actual' : ''}`,
+        startDate: periodStart,
+        endDate: periodEnd,
+        isCurrent
+      });
+    }
+
+    return options;
+  }, []);
+
+  const activeEdpKey = useMemo(() => {
+    const found = commercialPeriodOptions.find(o => o.startDate === startDate && o.endDate === endDate);
+    return found ? found.key : '';
+  }, [commercialPeriodOptions, startDate, endDate]);
 
   const toggleTypeSelection = (type: Equipment['type']) => {
     setSelectedTypes(prev => {
@@ -667,8 +715,64 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     };
   }, [fleet, ganttDayRecords, ganttFilterType, settings]);
 
-  // Calendar cells for the Filtered Dates Gantt Calendar Card (Phase 35)
+  // Check if the current filter range spans 5 weeks or less
+  const isGanttContinuousRange = useMemo(() => {
+    if (!startDate || !endDate) return false;
+    const startD = parseLocalDate(startDate);
+    const endD = parseLocalDate(endDate);
+    if (!startD || !endD || startD > endD) return false;
+
+    const startDayIdx = (startD.getDay() + 6) % 7; // 0 = Lun, 6 = Dom
+    const firstMonday = new Date(startD.getFullYear(), startD.getMonth(), startD.getDate() - startDayIdx);
+
+    const endDayIdx = (endD.getDay() + 6) % 7;
+    const lastSunday = new Date(endD.getFullYear(), endD.getMonth(), endD.getDate() + (6 - endDayIdx));
+
+    const diffDays = Math.round((lastSunday.getTime() - firstMonday.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const numWeeks = diffDays / 7;
+
+    return numWeeks <= 5;
+  }, [startDate, endDate]);
+
+  // Calendar cells for the Filtered Dates Gantt Calendar Card (Phase 35 / 36)
   const ganttCalendarCells = useMemo(() => {
+    // Mode 1: Continuous Range (<= 5 weeks)
+    if (isGanttContinuousRange && startDate && endDate) {
+      const startD = parseLocalDate(startDate);
+      const endD = parseLocalDate(endDate);
+      if (startD && endD) {
+        const startDayIdx = (startD.getDay() + 6) % 7;
+        const firstMonday = new Date(startD.getFullYear(), startD.getMonth(), startD.getDate() - startDayIdx);
+
+        const endDayIdx = (endD.getDay() + 6) % 7;
+        const lastSunday = new Date(endD.getFullYear(), endD.getMonth(), endD.getDate() + (6 - endDayIdx));
+
+        const diffDays = Math.round((lastSunday.getTime() - firstMonday.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+        const cells: { day: number; dateStr: string; isCurrentMonth: boolean; monthShort?: string }[] = [];
+
+        for (let i = 0; i < diffDays; i++) {
+          const curr = new Date(firstMonday.getFullYear(), firstMonday.getMonth(), firstMonday.getDate() + i);
+          const y = curr.getFullYear();
+          const m = curr.getMonth() + 1;
+          const d = curr.getDate();
+          const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+          const isInRange = dateStr >= startDate && dateStr <= endDate;
+          
+          const showMonthTag = d === 1 || i === 0;
+          const monthShort = showMonthTag ? MONTH_NAMES_ES[curr.getMonth()].slice(0, 3) : undefined;
+
+          cells.push({
+            day: d,
+            dateStr,
+            isCurrentMonth: isInRange,
+            monthShort
+          });
+        }
+        return cells;
+      }
+    }
+
+    // Mode 2: Month-by-month fallback (> 5 weeks)
     const calYear = ganttCalDate.getFullYear();
     const calMonth = ganttCalDate.getMonth();
 
@@ -681,7 +785,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     const daysInMonth = lastDay.getDate();
     const prevMonthDays = new Date(calYear, calMonth, 0).getDate();
 
-    const cells: { day: number; dateStr: string; isCurrentMonth: boolean }[] = [];
+    const cells: { day: number; dateStr: string; isCurrentMonth: boolean; monthShort?: string }[] = [];
 
     // Prev month padding
     for (let i = startDayIdx - 1; i >= 0; i--) {
@@ -706,7 +810,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     }
 
     return cells;
-  }, [ganttCalDate]);
+  }, [isGanttContinuousRange, startDate, endDate, ganttCalDate]);
 
   const getDayTruckAvailability = useCallback((dateStr: string) => {
     const trucks = fleet.filter(e => e.type === 'Camión Fábrica');
@@ -901,7 +1005,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
             value={endDate}
             onChange={setEndDate}
             min={startDate}
-            max={todayStr}
             rangeStart={startDate}
             rangeEnd={endDate}
           />
@@ -909,13 +1012,56 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
         
         <div className="filter-group" style={{ marginLeft: 'auto' }}>
           <span className="filter-label">Filtros Rápidos</span>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(7)}>7D</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(15)}>15D</button>
             <button className="btn btn-secondary btn-sm" onClick={setMonthPreset}>Mes Actual</button>
-            <button className="btn btn-secondary btn-sm" onClick={setContractCyclePreset} style={{ fontWeight: 'bold', color: 'var(--primary-light)' }}>
-              Período Contrato (21-20)
+            <button 
+              className="btn btn-secondary btn-sm" 
+              onClick={setContractCyclePreset} 
+              style={{ 
+                fontWeight: '700', 
+                color: activeEdpKey ? 'var(--primary-light)' : undefined,
+                borderColor: activeEdpKey ? 'var(--primary)' : undefined
+              }}
+              title="Filtrar por el Período Comercial (21 al 20) vigente"
+            >
+              Período Comercial (21-20)
             </button>
+
+            {/* Dropdown de Selección de Período Comercial (EDP) */}
+            <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <select
+                value={activeEdpKey}
+                onChange={(e) => {
+                  const sel = commercialPeriodOptions.find(o => o.key === e.target.value);
+                  if (sel) {
+                    setStartDate(sel.startDate);
+                    setEndDate(sel.endDate);
+                  }
+                }}
+                className="btn btn-secondary btn-sm"
+                style={{
+                  padding: '6px 12px',
+                  fontWeight: '700',
+                  color: activeEdpKey ? 'var(--primary-light)' : 'var(--text-primary)',
+                  borderColor: activeEdpKey ? 'var(--primary)' : 'var(--border-color)',
+                  background: activeEdpKey ? 'rgba(0, 102, 255, 0.08)' : 'var(--bg-input)',
+                  cursor: 'pointer',
+                  borderRadius: '6px',
+                  outline: 'none',
+                  fontSize: '0.82rem'
+                }}
+                title="Seleccione un período comercial de facturación (EDP)"
+              >
+                <option value="">Seleccionar Período Comercial (EDP)...</option>
+                {commercialPeriodOptions.map(opt => (
+                  <option key={opt.key} value={opt.key}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -1010,266 +1156,92 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
       {/* TAB 1: OVERVIEW TAB CONTENT */}
       {activeTab === 'overview' && (
         <>
-          {/* Equipment Type Filter Checkboxes Bar */}
-          <div id="type-checkboxes-panel" className="glass filter-bar" style={{ marginTop: '-12px', marginBottom: '24px' }}>
-            <div className="filter-group" style={{ width: '100%' }}>
-              <span className="filter-label" style={{ marginBottom: '8px' }}>Equipos a Evaluar en KPI</span>
-              <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap' }}>
-                {(['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'] as Equipment['type'][]).map(t => (
-                  <label 
-                    key={t} 
-                    style={{ 
-                      display: 'inline-flex', 
-                      alignItems: 'center', 
-                      gap: '8px', 
-                      fontSize: '0.9rem', 
-                      cursor: 'pointer', 
-                      fontWeight: '600',
-                      userSelect: 'none'
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedTypes.includes(t)}
-                      onChange={() => toggleTypeSelection(t)}
-                      style={{ 
-                        cursor: 'pointer', 
-                        width: '18px', 
-                        height: '18px',
-                        accentColor: 'var(--primary-light)'
-                      }}
-                    />
-                    <span>{getPluralType(t)}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* NUEVA TARJETA: CALENDARIO DE FECHAS FILTRADAS & ACCESO A CARTA GANTT (Fase 35) */}
-          <div className="glass table-card" style={{ marginBottom: '24px', padding: '22px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '14px' }}>
+          {/* Tarjeta EQUIPOS A EVALUAR EN KPI con ANÁLISIS DE CUMPLIMIENTO CONTRACTUAL integrado */}
+          <div id="type-checkboxes-panel" className="glass table-card" style={{ marginTop: '-12px', marginBottom: '24px', padding: '20px 24px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              
+              {/* Sección Selección de Equipos */}
               <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <Calendar size={18} style={{ color: 'var(--primary)' }} />
-                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
-                    Cronograma Diario de Disponibilidad de Camiones (Carta Gantt)
-                  </h3>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px', flexWrap: 'wrap', gap: '10px' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: '700', color: 'var(--text-primary)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                      Equipos a Evaluar en KPI
+                    </h3>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      Seleccione los tipos de equipo que computan para la disponibilidad contractual del contrato.
+                    </p>
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    {selectedTypes.length} de 4 tipos seleccionados
+                  </div>
                 </div>
-                <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
-                  Haga clic en cualquier día del período filtrado para abrir la Carta Gantt horaria (07:00 a 19:00 hrs) y revisar el estado de cada camión fábrica.
-                </p>
-              </div>
 
-              {/* Controles de Navegación de Mes */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: '600' }}>
-                  Período: {formatToDDMMYYYY(startDate)} al {formatToDDMMYYYY(endDate)}
-                </span>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer'
-                    }}
-                    title="Mes anterior"
-                  >
-                    <ChevronLeft size={16} />
-                  </button>
-                  <span style={{ fontWeight: '700', fontSize: '0.88rem', minWidth: '130px', textAlign: 'center', textTransform: 'capitalize' }}>
-                    {MONTH_NAMES_ES[ganttCalDate.getMonth()]} {ganttCalDate.getFullYear()}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
-                    style={{
-                      width: '28px',
-                      height: '28px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      background: 'rgba(255, 255, 255, 0.05)',
-                      color: 'var(--text-primary)',
-                      cursor: 'pointer'
-                    }}
-                    title="Mes siguiente"
-                  >
-                    <ChevronRight size={16} />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Encabezado Días de la Semana */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', textAlign: 'center', marginBottom: '8px' }}>
-              {WEEKDAYS_SHORT_ES.map(dayName => (
-                <div key={dayName} style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                  {dayName}
-                </div>
-              ))}
-            </div>
-
-            {/* Grilla de Días */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
-              {ganttCalendarCells.map(({ day, dateStr, isCurrentMonth }, idx) => {
-                const isInRange = dateStr >= startDate && dateStr <= endDate;
-                const shift = getShiftForDate(dateStr);
-                const dayAvail = getDayTruckAvailability(dateStr);
-                const isTodayDate = dateStr === todayStr;
-
-                return (
-                  <button
-                    key={`${dateStr}-${idx}`}
-                    type="button"
-                    disabled={!isInRange}
-                    onClick={() => {
-                      if (isInRange) {
-                        setSelectedGanttDate(dateStr);
-                      }
-                    }}
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      padding: '8px 10px',
-                      minHeight: '68px',
-                      borderRadius: '10px',
-                      border: isTodayDate 
-                        ? '1.5px solid #0066ff' 
-                        : (isInRange ? '1px solid var(--border-color)' : '1px solid transparent'),
-                      background: isInRange ? 'var(--bg-card)' : 'transparent',
-                      opacity: isInRange ? 1 : 0.22,
-                      cursor: isInRange ? 'pointer' : 'default',
-                      position: 'relative',
-                      textAlign: 'left',
-                      transition: 'all 0.15s ease'
-                    }}
-                    onMouseEnter={(e) => {
-                      if (isInRange) {
-                        e.currentTarget.style.borderColor = '#0066ff';
-                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(0, 102, 255, 0.16)';
-                        e.currentTarget.style.transform = 'translateY(-2px)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (isInRange) {
-                        e.currentTarget.style.borderColor = isTodayDate ? '#0066ff' : 'var(--border-color)';
-                        e.currentTarget.style.boxShadow = 'none';
-                        e.currentTarget.style.transform = 'none';
-                      }
-                    }}
-                  >
-                    {/* Fila Superior: Número del Día y Badge de Turno */}
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                      <span style={{ 
-                        fontWeight: '700', 
-                        fontSize: '0.88rem', 
-                        color: isTodayDate ? '#0066ff' : (isCurrentMonth ? 'var(--text-primary)' : 'var(--text-muted)') 
-                      }}>
-                        {day}
-                      </span>
-                      {isInRange && (
-                        <span style={{
-                          fontSize: '0.62rem',
-                          fontWeight: '800',
-                          padding: '1px 5px',
-                          borderRadius: '3px',
-                          background: shift === 'A' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(217, 119, 6, 0.15)',
-                          color: shift === 'A' ? '#2563eb' : '#d97706',
-                          border: shift === 'A' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                <div style={{ display: 'flex', gap: '20px', flexWrap: 'wrap', padding: '12px 16px', background: 'rgba(255, 255, 255, 0.03)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
+                  {(['Camión Fábrica', 'Cargador Frontal', 'Polvorín Móvil', 'Camioneta'] as Equipment['type'][]).map(t => (
+                    <label 
+                      key={t} 
+                      style={{ 
+                        display: 'inline-flex', 
+                        alignItems: 'center', 
+                        gap: '8px', 
+                        fontSize: '0.9rem', 
+                        cursor: 'pointer', 
+                        fontWeight: '600',
+                        userSelect: 'none'
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedTypes.includes(t)}
+                        onChange={() => toggleTypeSelection(t)}
+                        style={{ 
+                          cursor: 'pointer', 
+                          width: '18px', 
+                          height: '18px',
+                          accentColor: 'var(--primary-light)'
                         }}
-                        title={`Turno ${shift}`}
-                        >
-                          {shift}
-                        </span>
-                      )}
+                      />
+                      <span>{getPluralType(t)}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sección Análisis de Cumplimiento Contractual */}
+              <div style={{ paddingTop: '16px', borderTop: '1px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '10px' }}>
+                  <Award size={18} style={{ color: metrics.overallContractual >= 95 ? '#10b981' : '#f59e0b' }} />
+                  <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                    Análisis de Cumplimiento Contractual
+                  </h4>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '14px' }}>
+                  <div style={{ background: 'rgba(255,255,255,0.02)', padding: '12px 16px', borderRadius: '10px', border: '1px solid var(--border-color)', fontSize: '0.85rem' }}>
+                    <strong>Metas Diarias:</strong> Cada tipo de equipo exige un número de unidades operativas en turno de 12 horas. Disponibilidad de flota actual: <strong style={{ color: metrics.overallContractual >= 95 ? '#10b981' : '#ef4444' }}>{metrics.overallContractual.toFixed(1)}%</strong>.
+                  </div>
+
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '12px', 
+                    padding: '12px 16px', 
+                    borderRadius: '10px', 
+                    background: metrics.overallContractual >= 95 ? 'var(--color-operativo-bg)' : 'var(--color-mantencioncorrectiva-bg)',
+                    border: metrics.overallContractual >= 95 ? '1px solid rgba(16, 185, 129, 0.25)' : '1px solid rgba(239, 68, 68, 0.25)'
+                  }}>
+                    <div style={{ color: metrics.overallContractual >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)', fontWeight: 'bold', fontSize: '1.05rem', whiteSpace: 'nowrap' }}>
+                      {metrics.overallContractual >= 95 ? '✓ EXCELENTE' : '⚠ ALERTA'}
                     </div>
-
-                    {/* Fila Inferior: Disponibilidad de Camiones */}
-                    {isInRange && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: '6px' }}>
-                        {dayAvail.hasRecords ? (
-                          <>
-                            <span style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '0.73rem',
-                              fontWeight: '700',
-                              color: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
-                            }}>
-                              <span style={{
-                                width: '6px',
-                                height: '6px',
-                                borderRadius: '50%',
-                                background: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
-                              }} />
-                              {dayAvail.pct.toFixed(0)}%
-                            </span>
-                            <span style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: '600' }}>
-                              Gantt ↗
-                            </span>
-                          </>
-                        ) : (
-                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                            Sin reg.
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Leyenda Inferior */}
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'space-between', 
-              flexWrap: 'wrap', 
-              gap: '12px',
-              marginTop: '16px',
-              paddingTop: '12px',
-              borderTop: '1px solid var(--border-color)',
-              fontSize: '0.75rem',
-              color: 'var(--text-muted)'
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>A</span>
-                  <span>Turno A</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(217, 119, 6, 0.15)', color: '#d97706', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>B</span>
-                  <span>Turno B</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
-                  <span>≥95% Disponibilidad (Óptimo)</span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
-                  <span>&lt;95% Con Fallas / Inactividad</span>
+                    <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                      {metrics.overallContractual >= 95 
+                        ? 'La disponibilidad general cumple con los niveles requeridos (≥95%) para la operación de Planta Sierra Gorda.'
+                        : 'La disponibilidad se encuentra por debajo de la meta estipulada (95%). Revise las mantenciones y reparaciones.'}
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--primary)' }}>
-                <Clock size={14} />
-                <span>Haga clic en un día para abrir su Carta Gantt de 12 horas</span>
-              </div>
             </div>
           </div>
 
@@ -1380,9 +1352,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
             </div>
           </div>
 
-          {/* Charts Grid */}
-          <div className="charts-grid">
-            <div className="glass chart-card">
+          {/* Charts Row (3 Tarjetas en una misma fila) */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+            gap: '20px',
+            marginBottom: '24px'
+          }}>
+            <div className="glass chart-card" style={{ marginBottom: 0 }}>
               <h2 className="chart-title">Evolución de Disponibilidad Diaria</h2>
               <div className="chart-container">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1418,7 +1395,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
               </div>
             </div>
 
-            <div className="glass chart-card">
+            <div className="glass chart-card" style={{ marginBottom: 0 }}>
               <h2 className="chart-title">Comparación por Tipo de Equipo</h2>
               <div className="chart-container">
                 <ResponsiveContainer width="100%" height="100%">
@@ -1441,7 +1418,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
               </div>
             </div>
 
-            <div className="glass chart-card">
+            <div className="glass chart-card" style={{ marginBottom: 0 }}>
               <h2 className="chart-title">Distribución de Horas Fuera de Servicio</h2>
               <div className="chart-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {metrics.faultBreakdown[0]?.name === 'Sin fallas' ? (
@@ -1489,24 +1466,248 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                 )}
               </div>
             </div>
+          </div>
 
-            <div className="glass chart-card" style={{ height: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', justifyContent: 'center' }}>
-              <h2 className="chart-title" style={{ margin: 0 }}>Análisis de Cumplimiento Contractual</h2>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', fontSize: '0.9rem' }}>
-                <div style={{ background: 'rgba(0,0,0,0.02)', padding: '14px', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-                  <strong>Metas Diarias:</strong> Cada tipo de equipo exige un número de unidades operativas en turno de 12 horas. Disponibilidad de flota actual: <strong>{metrics.overallContractual.toFixed(1)}%</strong>.
+          {/* CRONOGRAMA DIARIO DE DISPONIBILIDAD DE CAMIONES (CARTA GANTT) */}
+          <div className="glass table-card" style={{ marginBottom: '24px', padding: '22px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '14px' }}>
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={18} style={{ color: 'var(--primary)' }} />
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: '700', color: 'var(--text-primary)' }}>
+                    Cronograma Diario de Disponibilidad de Camiones (Carta Gantt)
+                  </h3>
                 </div>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.83rem', color: 'var(--text-secondary)' }}>
+                  Haga clic en cualquier día del período filtrado para abrir la Carta Gantt horaria (07:00 a 19:00 hrs) y revisar el estado de cada camión fábrica.
+                </p>
+              </div>
+
+              {/* Controles de Vista de Período o Navegación de Mes */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: '600' }}>
+                  Período: {formatToDDMMYYYY(startDate)} al {formatToDDMMYYYY(endDate)}
+                </span>
                 
-                <div style={{ display: 'flex', gap: '12px', padding: '12px', borderRadius: '10px', background: metrics.overallContractual >= 95 ? 'var(--color-operativo-bg)' : 'var(--color-mantencioncorrectiva-bg)' }}>
-                  <div style={{ color: metrics.overallContractual >= 95 ? 'var(--color-operativo)' : 'var(--color-mantencioncorrectiva)', fontWeight: 'bold', fontSize: '1.1rem' }}>
-                    {metrics.overallContractual >= 95 ? '✓ EXCELENTE' : '⚠ ALERTA'}
+                {isGanttContinuousRange ? (
+                  <span style={{
+                    padding: '4px 10px',
+                    borderRadius: '6px',
+                    background: 'rgba(0, 102, 255, 0.1)',
+                    color: 'var(--primary)',
+                    border: '1px solid rgba(0, 102, 255, 0.25)',
+                    fontSize: '0.78rem',
+                    fontWeight: '700'
+                  }}>
+                    Vista Completa (≤ 5 semanas)
+                  </span>
+                ) : (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <button
+                      type="button"
+                      onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))}
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer'
+                      }}
+                      title="Mes anterior"
+                    >
+                      <ChevronLeft size={16} />
+                    </button>
+                    <span style={{ fontWeight: '700', fontSize: '0.88rem', minWidth: '130px', textAlign: 'center', textTransform: 'capitalize' }}>
+                      {MONTH_NAMES_ES[ganttCalDate.getMonth()]} {ganttCalDate.getFullYear()}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setGanttCalDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))}
+                      style={{
+                        width: '28px',
+                        height: '28px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        background: 'rgba(255, 255, 255, 0.05)',
+                        color: 'var(--text-primary)',
+                        cursor: 'pointer'
+                      }}
+                      title="Mes siguiente"
+                    >
+                      <ChevronRight size={16} />
+                    </button>
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                    {metrics.overallContractual >= 95 
-                      ? 'La disponibilidad general cumple con los niveles requeridos para la operación de Planta Sierra Gorda.'
-                      : 'La disponibilidad se encuentra por debajo de la meta estipulada (95%). Revise las mantenciones y reparaciones.'}
-                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Encabezado Días de la Semana */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px', textAlign: 'center', marginBottom: '8px' }}>
+              {WEEKDAYS_SHORT_ES.map(dayName => (
+                <div key={dayName} style={{ fontSize: '0.75rem', fontWeight: '700', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                  {dayName}
                 </div>
+              ))}
+            </div>
+
+            {/* Grilla de Días */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, 1fr)', gap: '6px' }}>
+              {ganttCalendarCells.map(({ day, dateStr, monthShort }, idx) => {
+                const isInRange = dateStr >= startDate && dateStr <= endDate;
+                const shift = getShiftForDate(dateStr);
+                const dayAvail = getDayTruckAvailability(dateStr);
+                const isTodayDate = dateStr === todayStr;
+
+                return (
+                  <button
+                    key={`${dateStr}-${idx}`}
+                    type="button"
+                    disabled={!isInRange}
+                    onClick={() => {
+                      if (isInRange) {
+                        setSelectedGanttDate(dateStr);
+                      }
+                    }}
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      justifyContent: 'space-between',
+                      padding: '8px 10px',
+                      minHeight: '68px',
+                      borderRadius: '10px',
+                      border: isTodayDate 
+                        ? '1.5px solid #0066ff' 
+                        : (isInRange ? '1px solid var(--border-color)' : '1px solid transparent'),
+                      background: isInRange ? 'var(--bg-card)' : 'transparent',
+                      opacity: isInRange ? 1 : 0.22,
+                      cursor: isInRange ? 'pointer' : 'default',
+                      position: 'relative',
+                      textAlign: 'left',
+                      transition: 'all 0.15s ease',
+                      boxShadow: isInRange ? '0 1px 3px rgba(0,0,0,0.06)' : 'none'
+                    }}
+                    onMouseEnter={(e) => {
+                      if (isInRange) {
+                        e.currentTarget.style.borderColor = '#0066ff';
+                        e.currentTarget.style.boxShadow = '0 4px 14px rgba(0, 102, 255, 0.16)';
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (isInRange) {
+                        e.currentTarget.style.borderColor = isTodayDate ? '#0066ff' : 'var(--border-color)';
+                        e.currentTarget.style.boxShadow = 'none';
+                        e.currentTarget.style.transform = 'none';
+                      }
+                    }}
+                    title={isInRange ? `Ver Carta Gantt del ${formatToDDMMYYYY(dateStr)} (Turno ${shift})` : dateStr}
+                  >
+                    {/* Fila Superior: Número del Día y Badge de Turno */}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
+                      <span style={{ 
+                        fontWeight: '700', 
+                        fontSize: '0.88rem', 
+                        color: isTodayDate ? '#0066ff' : (isInRange ? 'var(--text-primary)' : 'var(--text-muted)') 
+                      }}>
+                        {monthShort ? `${day} ${monthShort}` : day}
+                      </span>
+                      {isInRange && (
+                        <span style={{
+                          fontSize: '0.62rem',
+                          fontWeight: '800',
+                          padding: '1px 5px',
+                          borderRadius: '3px',
+                          background: shift === 'A' ? 'rgba(37, 99, 235, 0.15)' : 'rgba(217, 119, 6, 0.15)',
+                          color: shift === 'A' ? '#2563eb' : '#d97706',
+                          border: shift === 'A' ? '1px solid rgba(37, 99, 235, 0.3)' : '1px solid rgba(217, 119, 6, 0.3)'
+                        }}
+                        title={`Turno ${shift}`}
+                        >
+                          {shift}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Fila Inferior: Disponibilidad de Camiones */}
+                    {isInRange && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginTop: '6px' }}>
+                        {dayAvail.hasRecords ? (
+                          <>
+                            <span style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              fontSize: '0.73rem',
+                              fontWeight: '700',
+                              color: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
+                            }}>
+                              <span style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                background: dayAvail.pct >= 95 ? '#10b981' : (dayAvail.pct >= 85 ? '#f59e0b' : '#ef4444')
+                              }} />
+                              {dayAvail.pct.toFixed(0)}%
+                            </span>
+                            <span style={{ fontSize: '0.68rem', color: 'var(--primary)', fontWeight: '600' }}>
+                              Gantt ↗
+                            </span>
+                          </>
+                        ) : (
+                          <span style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                            Sin reg.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Leyenda Inferior */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'space-between', 
+              flexWrap: 'wrap', 
+              gap: '12px',
+              marginTop: '16px',
+              paddingTop: '12px',
+              borderTop: '1px solid var(--border-color)',
+              fontSize: '0.75rem',
+              color: 'var(--text-muted)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(37, 99, 235, 0.15)', color: '#2563eb', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>A</span>
+                  <span>Turno A</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ width: '15px', height: '15px', borderRadius: '3px', background: 'rgba(217, 119, 6, 0.15)', color: '#d97706', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: '800', fontSize: '0.65rem' }}>B</span>
+                  <span>Turno B</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#10b981' }} />
+                  <span>≥95% Disponibilidad (Óptimo)</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
+                  <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#ef4444' }} />
+                  <span>&lt;95% Con Fallas / Inactividad</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--primary)' }}>
+                <Clock size={14} />
+                <span>Haga clic en un día para abrir su Carta Gantt de 12 horas</span>
               </div>
             </div>
           </div>
@@ -2694,23 +2895,28 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
 
       {/* MODAL CARTA GANTT DE 12 HORAS (Fase 35) */}
       {selectedGanttDate && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          backgroundColor: 'rgba(0, 0, 0, 0.72)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1100,
-          backdropFilter: 'blur(8px)',
-          WebkitBackdropFilter: 'blur(8px)',
-          padding: '20px'
-        }}>
+        <div 
+          onClick={() => setSelectedGanttDate(null)}
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1100,
+            backdropFilter: 'blur(8px)',
+            WebkitBackdropFilter: 'blur(8px)',
+            padding: '20px',
+            cursor: 'pointer'
+          }}
+        >
           <div 
             className="glass table-card" 
+            onClick={(e) => e.stopPropagation()}
             style={{ 
               width: '100%', 
               maxWidth: '1200px', 
@@ -2720,7 +2926,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
               position: 'relative',
               borderRadius: '16px',
               boxShadow: '0 20px 50px rgba(0,0,0,0.45)',
-              animation: 'fadeInUp 0.2s ease-out'
+              animation: 'fadeInUp 0.2s ease-out',
+              cursor: 'default'
             }}
           >
             {/* Botón Cerrar */}

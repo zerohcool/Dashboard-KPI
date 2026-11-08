@@ -3,7 +3,8 @@ import logoBlanca from '../Logo Enaex Letra Blanca.png';
 import logoGris from '../Logo Enaex Letra Gris.png';
 import { dbService } from '../services/db';
 import type { ContractUser } from '../services/db';
-import { Sun, Moon, LogIn, ShieldAlert, UserCheck } from 'lucide-react';
+import { Sun, Moon, LogIn, ShieldAlert, UserCheck, ChevronDown } from 'lucide-react';
+import { LandingShowcase } from './LandingShowcase';
 
 interface LoginViewProps {
   onLogin: (user: ContractUser) => void;
@@ -54,7 +55,8 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
   };
 
   return (
-    <div style={{
+    <>
+    <div id="login-screen" style={{
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -311,6 +313,14 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
           </form>
         )}
       </div>
+
+      {/* Indicador para descubrir la presentación */}
+      <a href="#lp-intro" className="lp-scroll-cue">
+        <span>Conoce la plataforma</span>
+        <ChevronDown size={20} />
+      </a>
     </div>
+    <LandingShowcase scrollTargetId="login-screen" />
+    </>
   );
 };

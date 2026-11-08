@@ -45,12 +45,12 @@
   margin: 0 auto;
 }
 .lp-h1 {
-  font-size: clamp(2.4rem, 7vw, 5.6rem);
-  line-height: 1.02;
+  font-size: clamp(2.2rem, 5.4vw, 4.6rem);
+  line-height: 1.04;
   font-weight: 700;
   letter-spacing: -0.03em;
-  max-width: 14ch;
 }
+.lp-line { display: block; }
 .lp-word { display: inline-block; overflow: hidden; vertical-align: top; padding-bottom: 0.08em; margin-right: 0.24em; }
 .lp-word-inner { display: inline-block; will-change: transform; }
 .lp-lead {
@@ -81,9 +81,10 @@
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
-  justify-content: center;
-  gap: 46vw;
+  justify-content: space-between;
+  padding: 13vh 0;
   pointer-events: none;
 }
 .lp-cinema-word {
@@ -324,6 +325,58 @@
 }
 .lp-foot { margin-top: auto; padding-top: 80px; font-size: 0.8rem; color: var(--text-muted); }
 
+.lp-cta-logo {
+  height: clamp(44px, 6vw, 72px);
+  width: auto;
+  margin-top: 48px;
+  will-change: transform, filter, clip-path;
+}
+
+/* ---- Imágenes ampliables ---- */
+.lp-zoomable { cursor: zoom-in; }
+.lp-zoomable:focus-visible { outline: 3px solid var(--primary-light); outline-offset: 4px; }
+.lp-zoom {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+.lp-zoom-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 11, 20, 0.82);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: zoom-out;
+}
+.lp-zoom-box {
+  position: fixed;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 40px 140px -20px rgba(0, 0, 0, 0.6);
+  cursor: zoom-out;
+}
+.lp-zoom-box img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
+  display: block;
+}
+.lp-zoom-close {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  cursor: pointer;
+}
+
 /* ---- Indicador de scroll en el login ---- */
 .lp-scroll-cue {
   position: absolute;
@@ -356,7 +409,6 @@
   .lp-feature.rev .lp-media { order: 0; }
   .lp-pillar-grid, .lp-caps { grid-template-columns: repeat(2, 1fr); }
   .lp-compare { grid-template-columns: 1fr; }
-  .lp-cinema-words { flex-direction: column; gap: 32vh; }
 }
 @media (max-height: 720px) {
   .lp-scroll-cue { display: none; }

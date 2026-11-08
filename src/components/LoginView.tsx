@@ -320,7 +320,7 @@ export const LoginView: React.FC<LoginViewProps> = ({ onLogin, theme, setTheme, 
         <ChevronDown size={20} />
       </a>
     </div>
-    <LandingShowcase scrollTargetId="login-screen" />
+    <LandingShowcase scrollTargetId="login-screen" theme={theme} />
     </>
   );
 };

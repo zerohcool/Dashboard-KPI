@@ -1,12 +1,14 @@
-import React, { useLayoutEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
 import 'lenis/dist/lenis.css';
 import {
   ArrowUp, BellRing, Calculator, CalendarRange, ChartGantt, CircleCheck, CircleX,
-  Cloud, FileDown, Scale, ShieldCheck
+  Cloud, FileDown, Scale, ShieldCheck, X
 } from 'lucide-react';
+import logoBlanca from '../Logo Enaex Letra Blanca.png';
+import logoGris from '../Logo Enaex Letra Gris.png';
 import imgFlota from '../assets/landing/flota.webp';
 import imgMaterias from '../assets/landing/materias.webp';
 import imgDotacion from '../assets/landing/dotacion.webp';
@@ -79,11 +81,89 @@ const splitWords = (text: string) =>
 
 interface LandingShowcaseProps {
   scrollTargetId: string;
+  theme: 'light' | 'dark';
 }
 
-export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId }) => {
+interface ZoomState {
+  src: string;
+  alt: string;
+  source: HTMLElement;
+}
+
+// Caja final del visor: imagen completa centrada, respetando su proporción
+const targetBox = (img: HTMLImageElement) => {
+  const ratio = (img.naturalWidth || 16) / (img.naturalHeight || 10);
+  const maxW = window.innerWidth * 0.92;
+  const maxH = window.innerHeight * 0.86;
+  let w = maxW;
+  let h = w / ratio;
+  if (h > maxH) { h = maxH; w = h * ratio; }
+  return { left: (window.innerWidth - w) / 2, top: (window.innerHeight - h) / 2, width: w, height: h };
+};
+
+export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId, theme }) => {
   const root = useRef<HTMLDivElement>(null);
   const lenisRef = useRef<Lenis | null>(null);
+  const [zoom, setZoom] = useState<ZoomState | null>(null);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const backdropRef = useRef<HTMLDivElement>(null);
+  const closingRef = useRef(false);
+
+  const openZoom = (e: React.MouseEvent<HTMLElement> | React.KeyboardEvent<HTMLElement>) => {
+    const host = e.currentTarget;
+    const img = host.querySelector('img');
+    if (!img) return;
+    closingRef.current = false;
+    setZoom({ src: img.currentSrc || img.src, alt: img.alt, source: host });
+  };
+
+  const zoomKey = (e: React.KeyboardEvent<HTMLElement>) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openZoom(e); }
+  };
+
+  // Animación de apertura: desde la posición de la miniatura hasta el centro
+  useLayoutEffect(() => {
+    if (!zoom || !boxRef.current) return;
+    lenisRef.current?.stop();
+    const box = boxRef.current;
+    const img = box.querySelector('img') as HTMLImageElement;
+    const from = zoom.source.getBoundingClientRect();
+    const run = () => {
+      const to = targetBox(img);
+      gsap.set(box, { left: from.left, top: from.top, width: from.width, height: from.height, borderRadius: 18 });
+      gsap.to(box, { ...to, borderRadius: 12, duration: 0.75, ease: 'expo.inOut' });
+      gsap.fromTo(backdropRef.current, { opacity: 0 }, { opacity: 1, duration: 0.5, ease: 'power2.out' });
+      gsap.fromTo('.lp-zoom-close', { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.4, delay: 0.45, ease: 'back.out(2)' });
+    };
+    gsap.set(box, { left: from.left, top: from.top, width: from.width, height: from.height });
+    if (img.complete) run(); else img.onload = run;
+  }, [zoom]);
+
+  const closeZoom = useCallback(() => {
+    if (!zoom || !boxRef.current || closingRef.current) return;
+    closingRef.current = true;
+    const to = zoom.source.getBoundingClientRect();
+    gsap.to('.lp-zoom-close', { opacity: 0, duration: 0.15 });
+    gsap.to(backdropRef.current, { opacity: 0, duration: 0.5, delay: 0.1, ease: 'power2.in' });
+    gsap.to(boxRef.current, {
+      left: to.left, top: to.top, width: to.width, height: to.height, borderRadius: 18,
+      duration: 0.6, ease: 'expo.inOut',
+      onComplete: () => {
+        setZoom(null);
+        lenisRef.current?.start();
+        zoom.source.focus({ preventScroll: true });
+      }
+    });
+  }, [zoom]);
+
+  useEffect(() => {
+    if (!zoom) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') closeZoom(); };
+    const onResize = () => { if (boxRef.current) gsap.set(boxRef.current, targetBox(boxRef.current.querySelector('img') as HTMLImageElement)); };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('resize', onResize);
+    return () => { window.removeEventListener('keydown', onKey); window.removeEventListener('resize', onResize); };
+  }, [zoom, closeZoom]);
 
   useLayoutEffect(() => {
     const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -131,8 +211,8 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
         cinema
           .fromTo('.lp-cinema-frame', { scale: 0.42, borderRadius: 32 }, { scale: 1, borderRadius: 14, duration: 1 }, 0)
           .fromTo('.lp-cinema-frame img', { scale: 1.35, yPercent: 6 }, { scale: 1, yPercent: 0, duration: 1 }, 0)
-          .to('.lp-cinema-word.left', { xPercent: -140, opacity: 0, duration: 0.7 }, 0)
-          .to('.lp-cinema-word.right', { xPercent: 140, opacity: 0, duration: 0.7 }, 0)
+          .to('.lp-cinema-word.left', { yPercent: -160, opacity: 0, duration: 0.6 }, 0)
+          .to('.lp-cinema-word.right', { yPercent: 160, opacity: 0, duration: 0.6 }, 0)
           .fromTo('.lp-cinema-caption', { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25 }, 0.8);
 
         // Filas de funcionalidades: revelado + parallax interno
@@ -161,30 +241,44 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
           });
         });
 
-        // Pilares ponderados: barra + contadores
-        gsap.from('.lp-bar-seg', {
-          scaleX: 0, transformOrigin: 'left center', duration: 1.2, ease: 'expo.out', stagger: 0.12,
-          scrollTrigger: { trigger: '.lp-pillars', start: 'top 70%' }
-        });
-        gsap.utils.toArray<HTMLElement>('.lp-count').forEach((el) => {
+        // Pilares ponderados: barra + contadores (se repite cada vez que se entra a la sección)
+        const pillarsTl = gsap.timeline({ paused: true });
+        pillarsTl
+          .fromTo('.lp-bar-seg', { scaleX: 0 }, { scaleX: 1, transformOrigin: 'left center', duration: 1.2, ease: 'expo.out', stagger: 0.12 }, 0)
+          .fromTo('.lp-pillar', { y: 40, opacity: 0 }, { y: 0, opacity: 1, duration: 0.9, ease: 'power3.out', stagger: 0.1 }, 0.1);
+        gsap.utils.toArray<HTMLElement>('.lp-count').forEach((el, i) => {
           const target = Number(el.dataset.value);
           const obj = { v: 0 };
-          gsap.to(obj, {
+          pillarsTl.fromTo(obj, { v: 0 }, {
             v: target, duration: 1.6, ease: 'power2.out',
-            onUpdate: () => { el.textContent = `${Math.round(obj.v)}%`; },
-            scrollTrigger: { trigger: '.lp-pillars', start: 'top 70%' }
-          });
+            onUpdate: () => { el.textContent = `${Math.round(obj.v)}%`; }
+          }, 0.1 + i * 0.1);
         });
-        gsap.from('.lp-pillar', {
-          y: 40, opacity: 0, duration: 0.9, ease: 'power3.out', stagger: 0.1,
-          scrollTrigger: { trigger: '.lp-pillars', start: 'top 65%' }
+        ScrollTrigger.create({
+          trigger: '.lp-pillars',
+          start: 'top 70%',
+          end: 'bottom 30%',
+          onEnter: () => pillarsTl.restart(),
+          onEnterBack: () => pillarsTl.restart(),
+          onLeave: () => pillarsTl.pause(0),
+          onLeaveBack: () => pillarsTl.pause(0)
         });
 
-        // Capacidades: entrada escalonada
-        gsap.from('.lp-cap', {
-          y: 60, opacity: 0, rotateX: -12, duration: 0.9, ease: 'power3.out',
-          stagger: { each: 0.07, grid: 'auto', from: 'start' },
-          scrollTrigger: { trigger: '.lp-caps', start: 'top 72%' }
+        // Capacidades: las tarjetas se arman con el scroll (scrub), cada columna a distinto ritmo
+        gsap.utils.toArray<HTMLElement>('.lp-cap').forEach((card, i) => {
+          const col = i % 4;
+          gsap.fromTo(card,
+            { y: 140 + col * 50, opacity: 0, rotateX: -35, scale: 0.88 },
+            {
+              y: 0, opacity: 1, rotateX: 0, scale: 1, ease: 'power2.out',
+              scrollTrigger: { trigger: '.lp-caps', start: `top ${95 - col * 4}%`, end: `top ${45 - col * 4}%`, scrub: 1 }
+            });
+          gsap.fromTo(card.querySelector('.lp-cap-icon'),
+            { rotate: -90, scale: 0.4 },
+            {
+              rotate: 0, scale: 1, ease: 'back.out(1.6)',
+              scrollTrigger: { trigger: card, start: 'top 95%', end: 'top 60%', scrub: 1 }
+            });
         });
 
         // Beneficios: columnas desde los lados
@@ -202,6 +296,14 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
           scale: 1, opacity: 1, ease: 'none',
           scrollTrigger: { trigger: '.lp-cta', start: 'top bottom', end: 'center center', scrub: 1 }
         });
+
+        // Logo Enaex: se revela de izquierda a derecha con desenfoque al hacer scroll
+        gsap.timeline({
+          scrollTrigger: { trigger: '.lp-cta-logo', start: 'top 95%', end: 'top 55%', scrub: 1 }
+        })
+          .fromTo('.lp-cta-logo', { clipPath: 'inset(0% 100% 0% 0%)', filter: 'blur(14px)', scale: 0.7, opacity: 0 },
+            { clipPath: 'inset(0% 0% 0% 0%)', filter: 'blur(0px)', scale: 1, opacity: 1, ease: 'power2.out' })
+          .fromTo('.lp-cta-btn', { y: 30, opacity: 0 }, { y: 0, opacity: 1, ease: 'power2.out' }, 0.5);
 
         // Glows de fondo con parallax lento
         gsap.to('.lp-orb.a', { yPercent: -60, ease: 'none', scrollTrigger: { trigger: root.current, start: 'top bottom', end: 'bottom top', scrub: true } });
@@ -236,7 +338,10 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
       {/* Intro */}
       <section className="lp-intro" id="lp-intro">
         <p className="lp-eyebrow lp-fade">Dashboard KPI de Contrato · Planta Sierra Gorda</p>
-        <h2 className="lp-h1">{splitWords('Todos los KPI del contrato, en una sola plataforma.')}</h2>
+        <h2 className="lp-h1">
+          <span className="lp-line">{splitWords('Todos los KPI del contrato,')}</span>
+          <span className="lp-line">{splitWords('en una sola plataforma.')}</span>
+        </h2>
         <p className="lp-lead lp-fade">
           Flota, materias primas, dotación, calidad y seguridad registrados a diario. La nota del
           contrato y su efecto en el Estado de Pago, siempre al día.
@@ -254,7 +359,14 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
           <span className="lp-cinema-word left">Visibilidad</span>
           <span className="lp-cinema-word right">diaria</span>
         </div>
-        <div className="lp-cinema-frame">
+        <div
+          className="lp-cinema-frame lp-zoomable"
+          role="button"
+          tabIndex={0}
+          aria-label="Ampliar imagen: Dashboard de disponibilidad de flota"
+          onClick={openZoom}
+          onKeyDown={zoomKey}
+        >
           <img src={imgFlota} alt="Dashboard de disponibilidad de flota" />
           <div className="lp-cinema-caption">
             <span className="lp-chip">Disponibilidad de flota</span>
@@ -267,7 +379,14 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
       <section className="lp-features">
         {features.map((f, i) => (
           <article className={`lp-feature ${i % 2 ? 'rev' : ''}`} key={f.title}>
-            <div className="lp-media">
+            <div
+              className="lp-media lp-zoomable"
+              role="button"
+              tabIndex={0}
+              aria-label={`Ampliar imagen: ${f.alt}`}
+              onClick={openZoom}
+              onKeyDown={zoomKey}
+            >
               <img src={f.img} alt={f.alt} loading="lazy" />
             </div>
             <div className="lp-copy">
@@ -341,12 +460,30 @@ export const LandingShowcase: React.FC<LandingShowcaseProps> = ({ scrollTargetId
       {/* Cierre */}
       <section className="lp-cta">
         <h2 className="lp-cta-title">Datos al día,<br />decisiones a tiempo.</h2>
+        <img
+          className="lp-cta-logo"
+          src={theme === 'dark' ? logoBlanca : logoGris}
+          alt="Enaex"
+        />
         <button className="btn btn-primary lp-cta-btn" onClick={scrollToLogin}>
           <ArrowUp size={18} />
           <span>Ir al inicio de sesión</span>
         </button>
         <p className="lp-foot">Enaex · Planta Sierra Gorda · Desarrollo interno de Administración de Contrato</p>
       </section>
+
+      {/* Visor de imágenes ampliadas */}
+      {zoom && (
+        <div className="lp-zoom" role="dialog" aria-modal="true" aria-label={zoom.alt}>
+          <div className="lp-zoom-backdrop" ref={backdropRef} onClick={closeZoom} />
+          <div className="lp-zoom-box" ref={boxRef} onClick={closeZoom}>
+            <img src={zoom.src} alt={zoom.alt} />
+          </div>
+          <button className="lp-zoom-close" onClick={closeZoom} aria-label="Cerrar imagen" autoFocus>
+            <X size={22} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };

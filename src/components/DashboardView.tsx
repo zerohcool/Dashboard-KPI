@@ -10,7 +10,7 @@ import {
 } from 'recharts';
 import { 
   Download, FileDown, Clock, X, AlertTriangle, Award, Save, Layers, Users,
-  Calendar, ChevronLeft, ChevronRight, Zap, Truck
+  Calendar, ChevronLeft, ChevronRight, Zap, Truck, ChevronDown
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -157,6 +157,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     }
     return new Date();
   });
+
+  // States for Collapsible Sections in Fleet Availability (Phase 36)
+  const [isFleetSummaryOpen, setIsFleetSummaryOpen] = useState(false);
+  const [isFailingEquipmentsOpen, setIsFailingEquipmentsOpen] = useState(false);
 
   // Close Gantt modal on Escape key
   useEffect(() => {
@@ -347,51 +351,6 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     setStartDate(firstDay.toISOString().split('T')[0]);
     setEndDate(lastDay.toISOString().split('T')[0]);
   };
-
-  const setContractCyclePreset = () => {
-    const currentEdp = getCurrentCommercialPeriod(new Date());
-    setStartDate(currentEdp.startDate);
-    setEndDate(currentEdp.endDate);
-  };
-
-  const commercialPeriodOptions = useMemo(() => {
-    const options: { key: string; label: string; startDate: string; endDate: string; isCurrent: boolean }[] = [];
-    const today = new Date();
-    const currentEdp = getCurrentCommercialPeriod(today);
-
-    // Generate 1 future, current, and past 11 EDPs (total 13 options)
-    for (let offset = 1; offset >= -11; offset--) {
-      let edpM = currentEdp.edpMonth + offset;
-      let edpY = currentEdp.edpYear;
-      while (edpM < 1) {
-        edpM += 12;
-        edpY -= 1;
-      }
-      while (edpM > 12) {
-        edpM -= 12;
-        edpY += 1;
-      }
-
-      const { startDate: periodStart, endDate: periodEnd } = getCommercialPeriodDates(edpY, edpM);
-      const prevM = edpM === 1 ? 12 : edpM - 1;
-      const isCurrent = edpY === currentEdp.edpYear && edpM === currentEdp.edpMonth;
-
-      options.push({
-        key: `${periodStart}_${periodEnd}`,
-        label: `EDP ${MONTH_NAMES_ES[edpM - 1]} ${edpY} (21 ${MONTH_NAMES_ES[prevM - 1].slice(0, 3)} - 20 ${MONTH_NAMES_ES[edpM - 1].slice(0, 3)})${isCurrent ? ' • Actual' : ''}`,
-        startDate: periodStart,
-        endDate: periodEnd,
-        isCurrent
-      });
-    }
-
-    return options;
-  }, []);
-
-  const activeEdpKey = useMemo(() => {
-    const found = commercialPeriodOptions.find(o => o.startDate === startDate && o.endDate === endDate);
-    return found ? found.key : '';
-  }, [commercialPeriodOptions, startDate, endDate]);
 
   const toggleTypeSelection = (type: Equipment['type']) => {
     setSelectedTypes(prev => {
@@ -1012,56 +971,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
         
         <div className="filter-group" style={{ marginLeft: 'auto' }}>
           <span className="filter-label">Filtros Rápidos</span>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(7)}>7D</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(15)}>15D</button>
             <button className="btn btn-secondary btn-sm" onClick={setMonthPreset}>Mes Actual</button>
-            <button 
-              className="btn btn-secondary btn-sm" 
-              onClick={setContractCyclePreset} 
-              style={{ 
-                fontWeight: '700', 
-                color: activeEdpKey ? 'var(--primary-light)' : undefined,
-                borderColor: activeEdpKey ? 'var(--primary)' : undefined
-              }}
-              title="Filtrar por el Período Comercial (21 al 20) vigente"
-            >
-              Período Comercial (21-20)
-            </button>
-
-            {/* Dropdown de Selección de Período Comercial (EDP) */}
-            <div style={{ display: 'inline-flex', alignItems: 'center' }}>
-              <select
-                value={activeEdpKey}
-                onChange={(e) => {
-                  const sel = commercialPeriodOptions.find(o => o.key === e.target.value);
-                  if (sel) {
-                    setStartDate(sel.startDate);
-                    setEndDate(sel.endDate);
-                  }
-                }}
-                className="btn btn-secondary btn-sm"
-                style={{
-                  padding: '6px 12px',
-                  fontWeight: '700',
-                  color: activeEdpKey ? 'var(--primary-light)' : 'var(--text-primary)',
-                  borderColor: activeEdpKey ? 'var(--primary)' : 'var(--border-color)',
-                  background: activeEdpKey ? 'rgba(0, 102, 255, 0.08)' : 'var(--bg-input)',
-                  cursor: 'pointer',
-                  borderRadius: '6px',
-                  outline: 'none',
-                  fontSize: '0.82rem'
-                }}
-                title="Seleccione un período comercial de facturación (EDP)"
-              >
-                <option value="">Seleccionar Período Comercial (EDP)...</option>
-                {commercialPeriodOptions.map(opt => (
-                  <option key={opt.key} value={opt.key}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
         </div>
       </div>
@@ -1712,122 +1625,213 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
             </div>
           </div>
 
-          {/* Summary Table Card */}
-          <div className="glass table-card" style={{ marginBottom: '24px' }}>
-            <h2 className="chart-title">Desempeño Individual de Equipos</h2>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Nombre</th>
-                    <th>Tipo</th>
-                    <th>Patente</th>
-                    <th style={{ textAlign: 'center' }}>Horas Disponibles Entregadas</th>
-                    <th style={{ textAlign: 'center' }}>Horas Fuera Serv.</th>
-                    <th style={{ textAlign: 'center' }}>Disponibilidad Individual</th>
-                    <th>Último Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {fleetSummaryTable.map(row => (
-                    <tr key={row.id}>
-                      <td style={{ fontWeight: '600' }}>{row.name}</td>
-                      <td>{row.type}</td>
-                      <td><code>{row.patent || '-'}</code></td>
-                      <td style={{ textAlign: 'center' }}>{row.availHours} hrs</td>
-                      <td style={{ textAlign: 'center' }}>{row.downHours} hrs</td>
-                      <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                        {row.availability === null ? (
-                          <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>N/A</span>
-                        ) : row.availability < 100 ? (
-                          <span 
-                            onClick={() => setModalEqId(row.id)}
-                            style={{ 
-                              cursor: 'pointer', 
-                              textDecoration: 'underline', 
-                              color: row.availability >= 95 ? 'var(--color-operativo)' : row.availability >= 80 ? 'var(--color-mantencionprogramada)' : 'var(--color-mantencioncorrectiva)' 
-                            }}
-                            title="Ver detalle de inactividad"
-                          >
-                            {row.availability.toFixed(1)}%
-                          </span>
-                        ) : (
-                          <span style={{ color: 'var(--color-operativo)' }}>
-                            {row.availability.toFixed(1)}%
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <span className={`badge badge-${getStatusClass(row.lastStatus)}`}>
-                          {row.lastStatus}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {/* Summary Table Card (Collapsible) */}
+          <div className="glass table-card" style={{ marginBottom: '24px', padding: isFleetSummaryOpen ? '24px' : '18px 24px' }}>
+            <div 
+              onClick={() => setIsFleetSummaryOpen(prev => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+                padding: '4px 0'
+              }}
+              title={isFleetSummaryOpen ? 'Haga clic para contraer esta sección' : 'Haga clic para expandir y ver la tabla'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '6px',
+                  background: 'rgba(0, 102, 255, 0.1)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)'
+                }}>
+                  {isFleetSummaryOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                </div>
+                <div>
+                  <h2 className="chart-title" style={{ margin: 0, fontSize: '1.05rem' }}>
+                    Desempeño Individual de Equipos
+                  </h2>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {isFleetSummaryOpen 
+                      ? 'Listado detallado de horas entregadas y disponibilidad individual de toda la flota'
+                      : `${fleetSummaryTable.length} equipos evaluados • Haga clic para expandir`}
+                  </span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span className="badge badge-secondary" style={{ fontSize: '0.75rem' }}>
+                  {fleetSummaryTable.length} Equipos
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '600' }}>
+                  {isFleetSummaryOpen ? 'Contraer ▲' : 'Expandir ▼'}
+                </span>
+              </div>
             </div>
+
+            {isFleetSummaryOpen && (
+              <div className="table-wrapper" style={{ marginTop: '16px', animation: 'fadeIn 0.2s ease-out' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Nombre</th>
+                      <th>Tipo</th>
+                      <th>Patente</th>
+                      <th style={{ textAlign: 'center' }}>Horas Disponibles Entregadas</th>
+                      <th style={{ textAlign: 'center' }}>Horas Fuera Serv.</th>
+                      <th style={{ textAlign: 'center' }}>Disponibilidad Individual</th>
+                      <th>Último Estado</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fleetSummaryTable.map(row => (
+                      <tr key={row.id}>
+                        <td style={{ fontWeight: '600' }}>{row.name}</td>
+                        <td>{row.type}</td>
+                        <td><code>{row.patent || '-'}</code></td>
+                        <td style={{ textAlign: 'center' }}>{row.availHours} hrs</td>
+                        <td style={{ textAlign: 'center' }}>{row.downHours} hrs</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                          {row.availability === null ? (
+                            <span style={{ color: 'var(--text-muted)', fontWeight: 'normal' }}>N/A</span>
+                          ) : row.availability < 100 ? (
+                            <span 
+                              onClick={() => setModalEqId(row.id)}
+                              style={{ 
+                                cursor: 'pointer', 
+                                textDecoration: 'underline', 
+                                color: row.availability >= 95 ? 'var(--color-operativo)' : row.availability >= 80 ? 'var(--color-mantencionprogramada)' : 'var(--color-mantencioncorrectiva)' 
+                              }}
+                              title="Ver detalle de inactividad"
+                            >
+                              {row.availability.toFixed(1)}%
+                            </span>
+                          ) : (
+                            <span style={{ color: 'var(--color-operativo)' }}>
+                              {row.availability.toFixed(1)}%
+                            </span>
+                          )}
+                        </td>
+                        <td>
+                          <span className={`badge badge-${getStatusClass(row.lastStatus)}`}>
+                            {row.lastStatus}
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
-          {/* Details for failing equipments */}
-          <div className="glass table-card">
-            <h2 className="chart-title" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <AlertTriangle size={20} className="text-secondary" style={{ color: 'var(--color-mantencionprogramada)' }} />
-              Detalle de Equipos con Disponibilidad &lt; 100%
-            </h2>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '16px', marginTop: '-6px' }}>
-              Listado histórico de todas las mantenciones y fallas del período para equipos con disponibilidad menor al 100%.
-            </p>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Equipo</th>
-                    <th>Tipo</th>
-                    <th>Fecha</th>
-                    <th>Estado Operativo</th>
-                    <th style={{ textAlign: 'center' }}>Rango Horas</th>
-                    <th style={{ textAlign: 'center' }}>Horas Detenido</th>
-                    <th>Comentario / Detalle de Falla</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {failingEquipmentsRecords.map(r => {
-                    const eq = fleet.find(e => e.id === r.equipmentId);
-                    if (!eq) return null;
-                    const totalDown = r.endHour - r.startHour;
-                    
-                    return (
-                      <tr key={r.id}>
-                        <td style={{ fontWeight: '600' }}>{eq.name}</td>
-                        <td>{eq.type}</td>
-                        <td><code>{formatToDDMMYYYY(r.date)}</code></td>
-                        <td>
-                          <span className={`badge badge-${getStatusClass(r.status)}`}>
-                            {r.status}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: 'center' }}>
-                          <code>{r.startHour < 10 ? `0${r.startHour}:00` : `${r.startHour}:00`} - {r.endHour < 10 ? `0${r.endHour}:00` : `${r.endHour}:00`}</code>
-                        </td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
-                          {totalDown} hrs
-                        </td>
-                        <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios registrados.'}</td>
-                      </tr>
-                    );
-                  })}
+          {/* Details for failing equipments (Collapsible) */}
+          <div className="glass table-card" style={{ padding: isFailingEquipmentsOpen ? '24px' : '18px 24px' }}>
+            <div 
+              onClick={() => setIsFailingEquipmentsOpen(prev => !prev)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                userSelect: 'none',
+                padding: '4px 0'
+              }}
+              title={isFailingEquipmentsOpen ? 'Haga clic para contraer esta sección' : 'Haga clic para expandir y ver la tabla'}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '6px',
+                  background: failingEquipmentsRecords.length > 0 ? 'rgba(245, 158, 11, 0.12)' : 'rgba(16, 185, 129, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: failingEquipmentsRecords.length > 0 ? 'var(--color-mantencionprogramada)' : '#10b981'
+                }}>
+                  {isFailingEquipmentsOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                </div>
+                <div>
+                  <h2 className="chart-title" style={{ margin: 0, fontSize: '1.05rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <AlertTriangle size={18} style={{ color: 'var(--color-mantencionprogramada)' }} />
+                    <span>Detalle de Equipos con Disponibilidad &lt; 100%</span>
+                  </h2>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                    {isFailingEquipmentsOpen 
+                      ? 'Listado histórico de todas las mantenciones y fallas del período para equipos con disponibilidad menor al 100%'
+                      : `${failingEquipmentsRecords.length} eventos de inactividad registrados • Haga clic para expandir`}
+                  </span>
+                </div>
+              </div>
 
-                  {failingEquipmentsRecords.length === 0 && (
-                    <tr>
-                      <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
-                        Todos los equipos seleccionados mantuvieron el 100% de disponibilidad en este período.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span className={`badge ${failingEquipmentsRecords.length > 0 ? 'badge-mantencionprogramada' : 'badge-operativo'}`} style={{ fontSize: '0.75rem' }}>
+                  {failingEquipmentsRecords.length} Eventos
+                </span>
+                <span style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: '600' }}>
+                  {isFailingEquipmentsOpen ? 'Contraer ▲' : 'Expandir ▼'}
+                </span>
+              </div>
             </div>
+
+            {isFailingEquipmentsOpen && (
+              <div className="table-wrapper" style={{ marginTop: '16px', animation: 'fadeIn 0.2s ease-out' }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Equipo</th>
+                      <th>Tipo</th>
+                      <th>Fecha</th>
+                      <th>Estado Operativo</th>
+                      <th style={{ textAlign: 'center' }}>Rango Horas</th>
+                      <th style={{ textAlign: 'center' }}>Horas Detenido</th>
+                      <th>Comentario / Detalle de Falla</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {failingEquipmentsRecords.map(r => {
+                      const eq = fleet.find(e => e.id === r.equipmentId);
+                      if (!eq) return null;
+                      const totalDown = r.endHour - r.startHour;
+                      
+                      return (
+                        <tr key={r.id}>
+                          <td style={{ fontWeight: '600' }}>{eq.name}</td>
+                          <td>{eq.type}</td>
+                          <td><code>{formatToDDMMYYYY(r.date)}</code></td>
+                          <td>
+                            <span className={`badge badge-${getStatusClass(r.status)}`}>
+                              {r.status}
+                            </span>
+                          </td>
+                          <td style={{ textAlign: 'center' }}>
+                            <code>{r.startHour < 10 ? `0${r.startHour}:00` : `${r.startHour}:00`} - {r.endHour < 10 ? `0${r.endHour}:00` : `${r.endHour}:00`}</code>
+                          </td>
+                          <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--color-mantencioncorrectiva)' }}>
+                            {totalDown} hrs
+                          </td>
+                          <td style={{ fontStyle: 'italic', fontSize: '0.85rem' }}>{r.comment || 'Sin comentarios registrados.'}</td>
+                        </tr>
+                      );
+                    })}
+
+                    {failingEquipmentsRecords.length === 0 && (
+                      <tr>
+                        <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: 'var(--text-muted)' }}>
+                          Todos los equipos seleccionados mantuvieron el 100% de disponibilidad en este período.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </>
       )}
@@ -1994,7 +1998,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
               <div className="kpi-value" style={{ color: 'var(--color-mantencionpreventiva)' }}>
                 {metrics.attendanceCompliance.toFixed(1)}%
               </div>
-              <span className="kpi-subtext">Cumplimiento de dotación semanal</span>
+              <span className="kpi-subtext">
+                {metrics.attendanceCompliance >= 95.0 
+                  ? '✓ Cumple 100% KPI (meta ≥95%)' 
+                  : 'Cumplimiento de dotación semanal'}
+              </span>
             </div>
 
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--secondary)' } as any}>
@@ -2200,10 +2208,22 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                 <div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
                     <span>Asistencia de Dotación Semanal (Ponderación 10%)</span>
-                    <strong>{metrics.attendanceCompliance.toFixed(1)}%</strong>
+                    <strong>
+                      {metrics.attendanceCompliance >= 95.0 ? '100.0%' : `${metrics.attendanceCompliance.toFixed(1)}%`}
+                      {metrics.attendanceCompliance >= 95.0 && (
+                        <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: 'normal', marginLeft: '6px' }}>
+                          (Real: {metrics.attendanceCompliance.toFixed(1)}%)
+                        </span>
+                      )}
+                    </strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div style={{ width: `${metrics.attendanceCompliance}%`, height: '100%', background: 'var(--color-mantencionpreventiva)', borderRadius: '4px' }}></div>
+                    <div style={{ 
+                      width: `${metrics.attendanceCompliance >= 95.0 ? 100 : metrics.attendanceCompliance}%`, 
+                      height: '100%', 
+                      background: 'var(--color-mantencionpreventiva)', 
+                      borderRadius: '4px' 
+                    }}></div>
                   </div>
                 </div>
               </div>
@@ -2532,7 +2552,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                 <tbody>
                   {kpis.filter(k => k.category === 'dotacion').map(k => {
                     const realVal = metrics.attendanceCompliance;
-                    const weightedVal = (k.weight * realVal) / 100;
+                    const compliance = realVal >= 95.0 ? 100.0 : realVal;
+                    const weightedVal = (k.weight * compliance) / 100;
 
                     return (
                       <tr key={k.id}>
@@ -2542,7 +2563,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.minVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
-                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>{realVal.toFixed(1)}%</td>
+                        <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
+                          {realVal.toFixed(1)}%
+                          {realVal >= 95.0 && (
+                            <span style={{ display: 'block', fontSize: '0.72rem', color: '#10b981', fontWeight: '600' }}>
+                              (Cumple 100%)
+                            </span>
+                          )}
+                        </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
                         </td>

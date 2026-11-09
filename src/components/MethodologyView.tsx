@@ -116,6 +116,7 @@ export const MethodologyView: React.FC = () => {
                     Asistencia = (Suma Asistencia Real Diaria / Suma Dotación Contractual Requerida) * 100
                   </code>
                 </li>
+                <li><strong>Regla de Cumplimiento (Tolerancia ≥95%):</strong> Al igual que en la disponibilidad de flota, si la asistencia de dotación semanal es igual o superior al 95%, se considera un cumplimiento del 100% y no aplica descuento en la nota final del contrato.</li>
               </ul>
             </div>
           </div>

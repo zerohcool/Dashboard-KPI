@@ -481,7 +481,8 @@ export const calculateMetrics = (
       } else if (k.category === 'calidad') {
         compliance = qualityCompliancesMap[k.id] ?? 100.0;
       } else if (k.id === 'kpi-dotacion-comprometida') {
-        compliance = attendanceCompliance;
+        // Regla contractual: Si la asistencia de dotación es igual o superior al 95%, cumple 100% y no aplica descuento
+        compliance = attendanceCompliance >= 95.0 ? 100.0 : attendanceCompliance;
       } else if (k.category === 'seguridad') {
         compliance = safetyCompliancesMap[k.id] ?? 100.0;
       }

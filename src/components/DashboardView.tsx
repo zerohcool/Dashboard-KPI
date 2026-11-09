@@ -352,6 +352,45 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
     setEndDate(lastDay.toISOString().split('T')[0]);
   };
 
+  const commercialPeriodOptions = useMemo(() => {
+    const options: { key: string; label: string; startDate: string; endDate: string; isCurrent: boolean }[] = [];
+    const today = new Date();
+    const currentEdp = getCurrentCommercialPeriod(today);
+
+    // Generate 1 future EDP, current EDP, and past 14 EDPs (each running from 21st to 20th)
+    for (let offset = 1; offset >= -14; offset--) {
+      let edpM = currentEdp.edpMonth + offset;
+      let edpY = currentEdp.edpYear;
+      while (edpM < 1) {
+        edpM += 12;
+        edpY -= 1;
+      }
+      while (edpM > 12) {
+        edpM -= 12;
+        edpY += 1;
+      }
+
+      const { startDate: periodStart, endDate: periodEnd } = getCommercialPeriodDates(edpY, edpM);
+      const prevM = edpM === 1 ? 12 : edpM - 1;
+      const isCurrent = edpY === currentEdp.edpYear && edpM === currentEdp.edpMonth;
+
+      options.push({
+        key: `${periodStart}_${periodEnd}`,
+        label: `EDP ${MONTH_NAMES_ES[edpM - 1]} ${edpY} (${periodStart.slice(8, 10)} ${MONTH_NAMES_ES[prevM - 1].slice(0, 3)} - ${periodEnd.slice(8, 10)} ${MONTH_NAMES_ES[edpM - 1].slice(0, 3)})${isCurrent ? ' • Actual' : ''}`,
+        startDate: periodStart,
+        endDate: periodEnd,
+        isCurrent
+      });
+    }
+
+    return options;
+  }, []);
+
+  const activeEdpKey = useMemo(() => {
+    const found = commercialPeriodOptions.find(o => o.startDate === startDate && o.endDate === endDate);
+    return found ? found.key : '';
+  }, [commercialPeriodOptions, startDate, endDate]);
+
   const toggleTypeSelection = (type: Equipment['type']) => {
     setSelectedTypes(prev => {
       if (prev.includes(type)) {
@@ -971,10 +1010,44 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
         
         <div className="filter-group" style={{ marginLeft: 'auto' }}>
           <span className="filter-label">Filtros Rápidos</span>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(7)}>7D</button>
             <button className="btn btn-secondary btn-sm" onClick={() => setRangePreset(15)}>15D</button>
             <button className="btn btn-secondary btn-sm" onClick={setMonthPreset}>Mes Actual</button>
+
+            {/* Filtro de Estado de Pagos (EDP: 21 al 20) */}
+            <div style={{ display: 'inline-flex', alignItems: 'center' }}>
+              <select
+                value={activeEdpKey}
+                onChange={(e) => {
+                  const selected = commercialPeriodOptions.find(o => o.key === e.target.value);
+                  if (selected) {
+                    setStartDate(selected.startDate);
+                    setEndDate(selected.endDate);
+                  }
+                }}
+                className="input-select"
+                style={{
+                  padding: '6px 12px',
+                  fontSize: '0.82rem',
+                  borderRadius: '6px',
+                  fontWeight: activeEdpKey ? '700' : '500',
+                  borderColor: activeEdpKey ? 'var(--primary)' : 'var(--border-color)',
+                  background: 'var(--surface-color, #1e293b)',
+                  color: activeEdpKey ? 'var(--primary-light)' : 'var(--text-primary)',
+                  boxShadow: activeEdpKey ? '0 0 0 1px var(--primary)' : 'none',
+                  cursor: 'pointer'
+                }}
+                title="Filtrar por Estado de Pago (EDP: 21 del mes anterior al 20 del mes seleccionado)"
+              >
+                <option value="">Filtrar por Estado de Pago (EDP)...</option>
+                {commercialPeriodOptions.map(opt => (
+                  <option key={opt.key} value={opt.key}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
       </div>
@@ -1162,10 +1235,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
           <div className="kpi-grid">
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--primary)' } as any}>
               <span className="kpi-title">Disponibilidad de Flota</span>
-              <div className="kpi-value" style={{ color: 'var(--primary-light)' }}>
-                {metrics.overallContractual.toFixed(1)}%
+              <div className="kpi-value" style={{ color: 'var(--primary-light)', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                <span>{metrics.overallContractual >= 95.0 ? '100.0%' : `${metrics.overallContractual.toFixed(1)}%`}</span>
+                <span className="badge-real-value">
+                  (Real: {metrics.overallContractual.toFixed(1)}%)
+                </span>
               </div>
-              <span className="kpi-subtext">Cumplimiento del contrato de servicio</span>
+              <span className="kpi-subtext">
+                {metrics.overallContractual >= 95.0 
+                  ? '✓ Cumple 100% Contrato (meta ≥95%)' 
+                  : 'Cumplimiento del contrato de servicio'}
+              </span>
             </div>
 
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--secondary)' } as any}>
@@ -1995,8 +2075,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
           <div className="kpi-grid">
             <div className="glass kpi-card" style={{ '--card-accent': 'var(--color-mantencionpreventiva)' } as any}>
               <span className="kpi-title">Asistencia Global del Personal</span>
-              <div className="kpi-value" style={{ color: 'var(--color-mantencionpreventiva)' }}>
-                {metrics.attendanceCompliance.toFixed(1)}%
+              <div className="kpi-value" style={{ color: 'var(--color-mantencionpreventiva)', display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+                <span>{metrics.attendanceCompliance >= 95.0 ? '100.0%' : `${metrics.attendanceCompliance.toFixed(1)}%`}</span>
+                <span className="badge-real-value">
+                  (Real: {metrics.attendanceCompliance.toFixed(1)}%)
+                </span>
               </div>
               <span className="kpi-subtext">
                 {metrics.attendanceCompliance >= 95.0 
@@ -2149,9 +2232,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 {/* Flota y Materias Primas */}
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', marginBottom: '4px' }}>
                     <span>Disponibilidad de Flota y Materias Primas (Ponderación 31%)</span>
-                    <strong>{metrics.fleetAndMaterialsCompliance.toFixed(1)}%</strong>
+                    <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{metrics.fleetAndMaterialsCompliance.toFixed(1)}%</span>
+                      <span className="badge-real-value">
+                        (Real: {metrics.overallContractual.toFixed(1)}%)
+                      </span>
+                    </strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
                     <div style={{ width: `${Math.min(100, metrics.fleetAndMaterialsCompliance)}%`, height: '100%', background: 'var(--primary)', borderRadius: '4px' }}></div>
@@ -2160,61 +2248,75 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
 
                 {/* Calidad de servicio */}
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                    <span>Calidad de Servicio (Ponderación 49%)</span>
-                    <strong>
-                      {(
-                        kpis.filter(k => k.category === 'calidad').reduce((acc, k) => acc + (metrics.qualityCompliancesMap[k.id] ?? 100), 0) / 
-                        Math.max(1, kpis.filter(k => k.category === 'calidad').length)
-                      ).toFixed(1)}%
-                    </strong>
-                  </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div 
-                      style={{ 
-                        width: `${kpis.filter(k => k.category === 'calidad').reduce((acc, k) => acc + (metrics.qualityCompliancesMap[k.id] ?? 100), 0) / Math.max(1, kpis.filter(k => k.category === 'calidad').length)}%`, 
-                        height: '100%', 
-                        background: 'var(--secondary)', 
-                        borderRadius: '4px' 
-                      }}
-                    ></div>
-                  </div>
+                  {(() => {
+                    const qualityKpis = kpis.filter(k => k.category === 'calidad');
+                    const qualityComp = qualityKpis.reduce((acc, k) => acc + (metrics.qualityCompliancesMap[k.id] ?? 100), 0) / Math.max(1, qualityKpis.length);
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', marginBottom: '4px' }}>
+                          <span>Calidad de Servicio (Ponderación 49%)</span>
+                          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{qualityComp.toFixed(1)}%</span>
+                            <span className="badge-real-value">
+                              (Real: {qualityComp.toFixed(1)}%)
+                            </span>
+                          </strong>
+                        </div>
+                        <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div 
+                            style={{ 
+                              width: `${qualityComp}%`, 
+                              height: '100%', 
+                              background: 'var(--secondary)', 
+                              borderRadius: '4px' 
+                            }}
+                          ></div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Seguridad */}
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
-                    <span>Seguridad (Ponderación 10%)</span>
-                    <strong>
-                      {(
-                        kpis.filter(k => k.category === 'seguridad').reduce((acc, k) => acc + (metrics.safetyCompliancesMap[k.id] ?? 100), 0) / 
-                        Math.max(1, kpis.filter(k => k.category === 'seguridad').length)
-                      ).toFixed(1)}%
-                    </strong>
-                  </div>
-                  <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
-                    <div 
-                      style={{ 
-                        width: `${kpis.filter(k => k.category === 'seguridad').reduce((acc, k) => acc + (metrics.safetyCompliancesMap[k.id] ?? 100), 0) / Math.max(1, kpis.filter(k => k.category === 'seguridad').length)}%`, 
-                        height: '100%', 
-                        background: '#10b981', 
-                        borderRadius: '4px' 
-                      }}
-                    ></div>
-                  </div>
+                  {(() => {
+                    const safetyKpis = kpis.filter(k => k.category === 'seguridad');
+                    const safetyComp = safetyKpis.reduce((acc, k) => acc + (metrics.safetyCompliancesMap[k.id] ?? 100), 0) / Math.max(1, safetyKpis.length);
+                    return (
+                      <>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', marginBottom: '4px' }}>
+                          <span>Seguridad (Ponderación 10%)</span>
+                          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                            <span>{safetyComp.toFixed(1)}%</span>
+                            <span className="badge-real-value">
+                              (Real: {safetyComp.toFixed(1)}%)
+                            </span>
+                          </strong>
+                        </div>
+                        <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
+                          <div 
+                            style={{ 
+                              width: `${safetyComp}%`, 
+                              height: '100%', 
+                              background: '#047857', 
+                              borderRadius: '4px' 
+                            }}
+                          ></div>
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Asistencia */}
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem', marginBottom: '4px' }}>
                     <span>Asistencia de Dotación Semanal (Ponderación 10%)</span>
-                    <strong>
-                      {metrics.attendanceCompliance >= 95.0 ? '100.0%' : `${metrics.attendanceCompliance.toFixed(1)}%`}
-                      {metrics.attendanceCompliance >= 95.0 && (
-                        <span style={{ color: '#10b981', fontSize: '0.75rem', fontWeight: 'normal', marginLeft: '6px' }}>
-                          (Real: {metrics.attendanceCompliance.toFixed(1)}%)
-                        </span>
-                      )}
+                    <strong style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                      <span>{metrics.attendanceCompliance >= 95.0 ? '100.0%' : `${metrics.attendanceCompliance.toFixed(1)}%`}</span>
+                      <span className="badge-real-value">
+                        (Real: {metrics.attendanceCompliance.toFixed(1)}%)
+                      </span>
                     </strong>
                   </div>
                   <div style={{ width: '100%', height: '8px', background: 'rgba(0,0,0,0.05)', borderRadius: '4px', overflow: 'hidden' }}>
@@ -2411,7 +2513,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
-                    <th style={{ width: '120px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>% Cumplimiento / Real</th>
                     <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
                   </tr>
                 </thead>
@@ -2445,7 +2547,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                          {isExcluded ? 'N/A' : `${realVal.toFixed(1)}%`}
+                          {isExcluded ? 'N/A' : (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <span>{compliance.toFixed(1)}%</span>
+                              <span className="badge-real-value">
+                                (Real: {realVal.toFixed(1)}%)
+                              </span>
+                            </div>
+                          )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {isExcluded ? 'Excluido' : `${weightedVal.toFixed(2)}%`}
@@ -2517,7 +2626,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                           </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                          {compPct.toFixed(1)}%
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span>{compPct.toFixed(1)}%</span>
+                            <span className="badge-real-value">
+                              (Real: {realVal}{k.unit === '%' ? '%' : ` ${k.unit}`})
+                            </span>
+                          </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
@@ -2545,7 +2659,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                     <th style={{ width: '110px', textAlign: 'center' }}>Mínimo</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Esperada</th>
                     <th style={{ width: '110px', textAlign: 'center' }}>Máxima</th>
-                    <th style={{ width: '120px', textAlign: 'center' }}>Valor Real</th>
+                    <th style={{ width: '150px', textAlign: 'center' }}>% Cumplimiento / Real</th>
                     <th style={{ width: '150px', textAlign: 'center' }}>Valor Ponderado</th>
                   </tr>
                 </thead>
@@ -2564,12 +2678,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.expectedVal}</td>
                         <td style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>{k.maxVal}</td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold' }}>
-                          {realVal.toFixed(1)}%
-                          {realVal >= 95.0 && (
-                            <span style={{ display: 'block', fontSize: '0.72rem', color: '#10b981', fontWeight: '600' }}>
-                              (Cumple 100%)
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span>{compliance.toFixed(1)}%</span>
+                            <span className="badge-real-value">
+                              (Real: {realVal.toFixed(1)}%)
                             </span>
-                          )}
+                          </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
@@ -2709,7 +2823,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ fleet, addToast, s
                           )}
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: compPct === 100 ? 'var(--color-operativo)' : compPct >= 50 ? 'var(--color-mantencionprogramada)' : 'var(--color-mantencioncorrectiva)' }}>
-                          {compPct.toFixed(1)}%
+                          <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span>{compPct.toFixed(1)}%</span>
+                            <span className="badge-real-value">
+                              (Real: {k.id === 'kpi-seg-auditorias' ? `${realVal}%` : `${realVal} ${k.unit}`})
+                            </span>
+                          </div>
                         </td>
                         <td style={{ textAlign: 'center', fontWeight: 'bold', color: 'var(--primary-light)' }}>
                           {weightedVal.toFixed(2)}%
